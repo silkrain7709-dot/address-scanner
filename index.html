@@ -136,6 +136,15 @@ input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; po
 .cand.done .n { color: var(--ok); }
 .cand .t { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .cand button { flex: none; min-height: 36px; font-size: 13px; padding: 0 12px; }
+.swatchrow { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--ink); }
+.swatch { display: inline-block; width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(255,255,255,.4); flex: none; }
+.extras { display: flex; flex-direction: column; gap: 1px; font-size: 13px; margin-top: 2px; }
+.extras .k { color: var(--muted); }
+.extras b { font-weight: 500; color: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chipbtn { min-height: 34px; font-size: 13px; padding: 0 12px; border-radius: 99px; }
+.chipbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.h.col, .cand.col { border-left: 6px solid var(--cl, transparent); }
 details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--muted); padding: 4px 0; }
 .missing { font: 400 13px/1.7 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 </style>
@@ -162,6 +171,10 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
         <label id="sheetWrap" hidden>시트<select id="sheet"></select></label>
         <label>주소가 있는 열<select id="addrCol"></select></label>
         <label>순서 기준<select id="ordCol"></select></label>
+      </div>
+      <div id="extraWrap" hidden>
+        <p class="muted" style="margin-bottom:6px">결과에 같이 보여줄 열 (눌러서 켜고 꺼요)</p>
+        <div class="chips" id="extraChips"></div>
       </div>
       <div class="preview" id="preview" hidden><table><tbody id="previewBody"></tbody></table></div>
       <div class="row">
@@ -221,7 +234,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var list = [], ctx = null, wb = null, listFileName = '';
+  var list = [], ctx = null, wb = null, listFileName = '', extraSel = new Set();
   var found = new Map();          // list index -> {a, o, t}
   var worker = null, engineReady = false;
   var stream = null, scanning = false, busy = false, streak = {}, lastSig = null, lastLiveAt = 0, wake = null, audio = null;
@@ -250,7 +263,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     }
     return false;
   }
-  function prep(o, a) { var c = core(a), n = c.replace(/ /g, ''); return { o: String(o), a: a, n: n, s: c, nums: nums(a), g: grams(n) }; }
+  function prep(o, a, x, col) { var c = core(a), n = c.replace(/ /g, ''); return { o: String(o), a: a, n: n, s: c, nums: nums(a), g: grams(n), x: x || [], col: col || '' }; }
   function fixDigits(s) {   // OCR often reads 1 as l/I/| and 0 as O next to digits
     return s.replace(/([0-9])[lI|]/g, '$11').replace(/[lI|]([0-9])/g, '1$1').replace(/([0-9])[Oo]/g, '$10').replace(/[Oo]([0-9])/g, '0$1');
   }
@@ -290,6 +303,109 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   }
   function keyOf(hits) { return hits.map(function (h) { return list.indexOf(h); }).join(','); }
 
+  /* ---------- cell colors from the .xlsx file (read straight from the zip) ---------- */
+  var IDX = ['000000','FFFFFF','FF0000','00FF00','0000FF','FFFF00','FF00FF','00FFFF','000000','FFFFFF','FF0000','00FF00','0000FF','FFFF00','FF00FF','00FFFF','800000','008000','000080','808000','800080','008080','C0C0C0','808080','9999FF','993366','FFFFCC','CCFFFF','660066','FF8080','0066CC','CCCCFF','000080','FF00FF','FFFF00','00FFFF','800080','800000','008080','0000FF','00CCFF','CCFFFF','CCFFCC','FFFF99','99CCFF','FF99CC','CC99FF','FFCC99','3366FF','33CCCC','99CC00','FFCC00','FF9900','FF6600','666699','969696','003366','339966','003300','333300','993300','993366','333399','333333'];
+  var OFFICE = ['000000','FFFFFF','44546A','E7E6E6','4472C4','ED7D31','A5A5A5','FFC000','5B9BD5','70AD47'];
+  var zip = null;
+  async function openZip(buf) {
+    if (typeof DecompressionStream === 'undefined') return null;
+    var dv = new DataView(buf), u8 = new Uint8Array(buf), e = -1, i;
+    for (i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 66000); i--) { if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; } }
+    if (e < 0) return null;
+    var n = dv.getUint16(e + 10, true), p = dv.getUint32(e + 16, true), files = {};
+    for (var k = 0; k < n; k++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      var method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lo = dv.getUint32(p + 42, true);
+      files[new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl))] = { method: method, csize: csize, lo: lo };
+      p += 46 + nl + el + cl;
+    }
+    return {
+      text: async function (name) {
+        var f = files[name]; if (!f) return null;
+        var start = f.lo + 30 + dv.getUint16(f.lo + 26, true) + dv.getUint16(f.lo + 28, true), data = u8.subarray(start, start + f.csize);
+        if (f.method === 0) return new TextDecoder().decode(data);
+        return await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+      }
+    };
+  }
+  async function fillsFor(name) {
+    var out = {};
+    try {
+      if (!zip) return out;
+      var parse = function (t) { return new DOMParser().parseFromString(t, 'application/xml'); };
+      var wbx = await zip.text('xl/workbook.xml'), rel = await zip.text('xl/_rels/workbook.xml.rels'), sty = await zip.text('xl/styles.xml');
+      if (!wbx || !rel || !sty) return out;
+      var RNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', rid = null, i;
+      var sh = parse(wbx).getElementsByTagName('sheet');
+      for (i = 0; i < sh.length; i++) if (sh[i].getAttribute('name') === name) rid = sh[i].getAttributeNS(RNS, 'id') || sh[i].getAttribute('r:id');
+      if (!rid) return out;
+      var target = null, rs = parse(rel).getElementsByTagName('Relationship');
+      for (i = 0; i < rs.length; i++) if (rs[i].getAttribute('Id') === rid) target = rs[i].getAttribute('Target');
+      if (!target) return out;
+      var path = target.charAt(0) === '/' ? target.slice(1) : 'xl/' + target;
+      var theme = [], th = await zip.text('xl/theme/theme1.xml');
+      if (th) { var cs = parse(th).getElementsByTagNameNS('*', 'clrScheme')[0]; if (cs) for (i = 0; i < cs.children.length; i++) { var ch = cs.children[i].children[0]; if (ch) theme.push((ch.getAttribute('val') || ch.getAttribute('lastClr') || '000000').toUpperCase()); } }
+      if (theme.length < 10) theme = OFFICE.slice();
+      var tmap = [1, 0, 3, 2, 4, 5, 6, 7, 8, 9];
+      var col = function (el) {
+        if (!el) return null;
+        var rgb = el.getAttribute('rgb'), tn = el.getAttribute('theme'), ix = el.getAttribute('indexed'), tint = parseFloat(el.getAttribute('tint') || '0'), hex = null;
+        if (rgb) hex = rgb.slice(-6);
+        else if (tn !== null && tn !== '') hex = theme[tmap[+tn]] || null;
+        else if (ix !== null && ix !== '') hex = IDX[+ix] || null;
+        if (!hex || !/^[0-9A-Fa-f]{6}$/.test(hex)) return null;
+        if (tint) {
+          var f = function (v) { return Math.max(0, Math.min(255, Math.round(tint > 0 ? v * (1 - tint) + 255 * tint : v * (1 + tint)))); };
+          hex = [0, 2, 4].map(function (o) { return ('0' + f(parseInt(hex.substr(o, 2), 16)).toString(16)).slice(-2); }).join('');
+        }
+        return '#' + hex.toUpperCase();
+      };
+      var sd = parse(sty), fe = sd.getElementsByTagName('fills')[0], fc = [];
+      if (fe) for (i = 0; i < fe.children.length; i++) { var pf = fe.children[i].children[0]; fc.push(pf && pf.getAttribute('patternType') === 'solid' ? col(pf.getElementsByTagName('fgColor')[0]) : null); }
+      var xe = sd.getElementsByTagName('cellXfs')[0], sc = [];
+      if (xe) for (i = 0; i < xe.children.length; i++) sc.push(fc[+xe.children[i].getAttribute('fillId') || 0] || null);
+      var sx = await zip.text(path); if (!sx) return out;
+      var re = /<c\s([^>]*?)\/?>/g, mm;
+      while ((mm = re.exec(sx))) {
+        var rm = /\br="([A-Z]+\d+)"/.exec(mm[1]), sm = /\bs="(\d+)"/.exec(mm[1]);
+        if (rm && sm) { var cc = sc[+sm[1]]; if (cc && cc !== '#FFFFFF') out[rm[1]] = cc; }
+      }
+    } catch (err) {}
+    return out;
+  }
+  function colorName(hex) {
+    var r = parseInt(hex.substr(1, 2), 16) / 255, g = parseInt(hex.substr(3, 2), 16) / 255, b = parseInt(hex.substr(5, 2), 16) / 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn, h = 0, sat = 0;
+    if (d) {
+      sat = d / (1 - Math.abs(2 * l - 1));
+      h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h = (h * 60 + 360) % 360;
+    }
+    if (l > 0.94 && sat < 0.3) return '흰색';
+    if (l < 0.13) return '검정';
+    if (sat < 0.14) return '회색';
+    if (h < 15 || h >= 345) return l > 0.72 ? '분홍' : '빨강';
+    if (h < 40) return '주황';
+    if (h < 70) return '노랑';
+    if (h < 165) return '초록';
+    if (h < 200) return '청록';
+    if (h < 255) return l > 0.7 ? '하늘' : '파랑';
+    if (h < 290) return '보라';
+    return '분홍';
+  }
+  function extrasEl(it) {
+    if (!it || !it.x || !it.x.length) return null;
+    var d = document.createElement('div'); d.className = 'extras';
+    it.x.forEach(function (pr) { var l = document.createElement('div'), k = document.createElement('span'), b = document.createElement('b'); k.className = 'k'; k.textContent = pr[0] + '  '; b.textContent = pr[1]; l.append(k, b); d.append(l); });
+    return d;
+  }
+  function swatchEl(it) {
+    if (!it || !it.col) return null;
+    var w = document.createElement('div'); w.className = 'swatchrow';
+    var s = document.createElement('span'); s.className = 'swatch'; s.style.background = it.col;
+    var t = document.createElement('span'); t.textContent = colorName(it.col); w.append(s, t); return w;
+  }
+  function colorTag(it) { return it && it.col ? ' · ' + colorName(it.col) : ''; }
+
   /* ---------- excel list ---------- */
   function colLetter(i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
   function parseSheet(name) {
@@ -306,8 +422,14 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
       var bl = -1;
       for (var k = 0; k < ncol; k++) { var tot = 0; rows.slice(0, 50).forEach(function (r) { tot += (r[k] || '').length; }); if (tot > bl) { bl = tot; addrCol = k; } }
     }
-    ctx = { rows: rows, hIdx: hIdx, ncol: ncol, names: names };
+    var rg = null; try { rg = XLSX.utils.decode_range(wb.Sheets[name]['!ref']); } catch (e) {}
+    ctx = { rows: rows, hIdx: hIdx, ncol: ncol, names: names, r0: rg ? rg.s.r : 0, c0: rg ? rg.s.c : 0, fills: null };
     fillSelect($('addrCol'), addrCol); fillSelect($('ordCol'), ordCol, true);
+    extraSel = new Set();
+    for (var q = 0; q < ncol && extraSel.size < 3; q++) {
+      if (q === addrCol || q === ordCol) continue;
+      if (rows.slice(hIdx + 1).some(function (r) { return (r[q] || '') !== ''; })) extraSel.add(q);
+    }
   }
   function fillSelect(sel, val, withRow) {
     sel.textContent = '';
@@ -318,23 +440,53 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     }
     sel.value = String(val);
   }
-  function buildList() {
-    var a = +$('addrCol').value, oc = +$('ordCol').value, items = [], seq = 0;
-    for (var r = ctx.hIdx + 1; r < ctx.rows.length; r++) {
-      var addr = (ctx.rows[r][a] || '').trim(); if (!addr) continue; seq++;
-      items.push(prep(oc >= 0 ? ((ctx.rows[r][oc] || '').trim() || String(seq)) : String(seq), addr));
+  function colorOf(r, a) {
+    if (!ctx.fills) return '';
+    var rr = ctx.r0 + r + 1, c = ctx.fills[colLetter(ctx.c0 + a) + rr];
+    if (c) return c;
+    for (var k = 0; k < ctx.ncol; k++) { c = ctx.fills[colLetter(ctx.c0 + k) + rr]; if (c) return c; }
+    return '';
+  }
+  function renderChips() {
+    var box = $('extraChips'); box.textContent = '';
+    if (!ctx) return;
+    var a = +$('addrCol').value, oc = +$('ordCol').value;
+    for (var c = 0; c < ctx.ncol; c++) {
+      if (c === a || c === oc) continue;
+      (function (c) {
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'chipbtn';
+        b.textContent = colLetter(c) + '열' + (ctx.names[c] ? ' · ' + ctx.names[c] : '');
+        b.setAttribute('aria-pressed', extraSel.has(c) ? 'true' : 'false');
+        b.onclick = function () { if (extraSel.has(c)) extraSel.delete(c); else extraSel.add(c); buildList(true); };
+        box.append(b);
+      })(c);
     }
-    list = items; found.clear(); streak = {};
-    try { localStorage.setItem('addr-list', JSON.stringify({ name: listFileName, rows: list.map(function (it) { return [it.o, it.a]; }) })); } catch (e) {}
-    showList(); renderHist();
+  }
+  function buildList(keep) {
+    var a = +$('addrCol').value, oc = +$('ordCol').value, items = [], seq = 0;
+    var sel = Array.from(extraSel).filter(function (c) { return c !== a && c !== oc; }).sort(function (x, y) { return x - y; });
+    for (var r = ctx.hIdx + 1; r < ctx.rows.length; r++) {
+      var row = ctx.rows[r], addr = (row[a] || '').trim(); if (!addr) continue; seq++;
+      var x = []; sel.forEach(function (c) { var v = (row[c] || '').trim(); if (v) x.push([ctx.names[c] || (colLetter(c) + '열'), v]); });
+      items.push(prep(oc >= 0 ? ((row[oc] || '').trim() || String(seq)) : String(seq), addr, x, colorOf(r, a)));
+    }
+    list = items; if (keep !== true) found.clear(); streak = {};
+    try { localStorage.setItem('addr-list', JSON.stringify({ name: listFileName, rows: list.map(function (it) { return [it.o, it.a, it.x, it.col]; }) })); } catch (e) {}
+    showList(); renderChips(); renderHist(); renderCands();
+  }
+  async function selectSheet(name) {
+    parseSheet(name);
+    ctx.fills = await fillsFor(name);
+    buildList();
   }
   function showList() {
     var has = list.length > 0;
-    $('noList').hidden = has; $('hasList').hidden = !has; $('listClear').hidden = !has; $('preview').hidden = !has; $('ctrls').hidden = !ctx;
+    $('noList').hidden = has; $('hasList').hidden = !has; $('listClear').hidden = !has; $('preview').hidden = !has; $('ctrls').hidden = !ctx; $('extraWrap').hidden = !ctx;
     $('xlsBtn').textContent = has ? '다른 파일로 바꾸기' : '엑셀 파일 올리기'; $('xlsBtn').classList.toggle('primary', !has);
     if (!has) return;
     $('listName').textContent = listFileName || '저장된 목록';
-    $('listInfo').textContent = '주소 ' + list.length + '개 · 첫 주소가 ' + list[0].o + '번';
+    var nc = list.filter(function (it) { return it.col; }).length;
+    $('listInfo').textContent = '주소 ' + list.length + '개 · 첫 주소가 ' + list[0].o + '번' + (nc ? ' · 색이 칠해진 주소 ' + nc + '개' : '');
     var tb = $('previewBody'); tb.textContent = '';
     list.slice(0, 3).forEach(function (it) { var tr = document.createElement('tr'), a = document.createElement('td'), b = document.createElement('td'); a.textContent = it.o; b.textContent = it.a; tr.append(a, b); tb.append(tr); });
   }
@@ -342,30 +494,31 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var f = e.target.files[0]; e.target.value = ''; if (!f) return;
     if (typeof XLSX === 'undefined') { say('listStatus', '엑셀을 읽는 부품을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요.', 'err'); return; }
     var fr = new FileReader();
-    fr.onload = function () {
+    fr.onload = async function () {
       try {
         wb = XLSX.read(fr.result, { type: 'array' }); listFileName = f.name;
+        zip = null; try { zip = await openZip(fr.result); } catch (e) { zip = null; }
         var sh = $('sheet'); sh.textContent = '';
         wb.SheetNames.forEach(function (n) { var o = document.createElement('option'); o.value = n; o.textContent = n; sh.append(o); });
         $('sheetWrap').hidden = wb.SheetNames.length < 2;
-        parseSheet(wb.SheetNames[0]); buildList();
+        await selectSheet(wb.SheetNames[0]);
         say('listStatus', list.length ? '' : '주소를 찾지 못했어요. 주소가 있는 열을 골라 주세요.', list.length ? '' : 'warn');
       } catch (err) { say('listStatus', '이 파일을 읽을 수 없어요. 엑셀(.xlsx) 또는 CSV 파일인지 확인해 주세요.', 'err'); }
     };
     fr.onerror = function () { say('listStatus', '파일을 열 수 없어요. 다시 올려 주세요.', 'err'); };
     fr.readAsArrayBuffer(f);
   });
-  $('sheet').addEventListener('change', function () { parseSheet(this.value); buildList(); });
+  $('sheet').addEventListener('change', function () { selectSheet(this.value); });
   $('addrCol').addEventListener('change', buildList);
   $('ordCol').addEventListener('change', buildList);
   $('listClear').addEventListener('click', function () {
-    list = []; ctx = null; wb = null; listFileName = ''; found.clear(); streak = {};
+    list = []; ctx = null; wb = null; zip = null; listFileName = ''; found.clear(); streak = {};
     try { localStorage.removeItem('addr-list'); } catch (e) {}
     showList(); renderHist(); say('listStatus', '');
   });
   try {
     var sv = JSON.parse(localStorage.getItem('addr-list') || 'null');
-    if (sv && sv.rows && sv.rows.length) { list = sv.rows.map(function (r) { return prep(r[0], r[1]); }); listFileName = sv.name || ''; }
+    if (sv && sv.rows && sv.rows.length) { list = sv.rows.map(function (r) { return prep(r[0], r[1], r[2], r[3]); }); listFileName = sv.name || ''; }
   } catch (e) {}
 
   /* ---------- OCR engine ---------- */
@@ -408,13 +561,14 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   function sigDiff(a, b) { if (!a || !b) return 99; var s = 0; for (var i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; }
 
   /* ---------- live results ---------- */
-  function liveSet(cls, ord, unit, tag, addr, ref, acceptFn) {
+  function liveSet(cls, ord, unit, tag, addr, ref, acceptFn, item) {
     var L = $('live'); L.className = 'live ' + cls; L.textContent = '';
-    if (ord) { var o = document.createElement('div'); o.className = 'ord'; var b = document.createElement('b'); b.textContent = ord; o.append(b); if (unit) { var s = document.createElement('span'); s.textContent = unit; o.append(s); } L.append(o); }
+    if (ord) { var o = document.createElement('div'); o.className = 'ord'; var b = document.createElement('b'); b.textContent = ord; o.append(b); if (unit) { var s = document.createElement('span'); s.textContent = unit; o.append(s); } var sw = swatchEl(item); if (sw) o.append(sw); L.append(o); }
     var body = document.createElement('div'); body.className = 'body';
     var t = document.createElement('div'); t.className = 'tag'; t.textContent = tag; body.append(t);
     if (addr) { var a = document.createElement('div'); a.className = 'addr'; a.textContent = addr; body.append(a); }
     if (ref) { var r = document.createElement('div'); r.className = 'refaddr'; r.textContent = ref; body.append(r); }
+    var ex = extrasEl(item); if (ex) body.append(ex);
     if (acceptFn) { var bt = document.createElement('button'); bt.className = 'accept'; bt.textContent = '맞아요, 기록하기'; bt.onclick = acceptFn; body.append(bt); }
     L.append(body);
     $('ret').className = 'reticle' + (cls === 'ok' ? ' hit' : cls === 'near' ? ' near' : '');
@@ -445,7 +599,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   function showOk(entry, justNow) {
     var os = entry.hits.map(function (h) { return h.o; });
     liveSet('ok', os.slice(0, 3).join(', ') + (os.length > 3 ? '…' : ''), '번째',
-      justNow ? '찾았어요 · 기록했어요' : '이미 기록한 주소예요', entry.text, entry.hits[0].a !== entry.text ? '목록: ' + entry.hits[0].a : '');
+      justNow ? '찾았어요 · 기록했어요' : '이미 기록한 주소예요', entry.text, entry.hits[0].a !== entry.text ? '목록: ' + entry.hits[0].a : '', null, entry.hits[0]);
   }
   function handleText(text, once) {
     var r = analyze(text);
@@ -462,12 +616,12 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
         var fresh = target ? commit(target, o.text) : false;
         if (!shown) { showOk(o, fresh); shown = true; lastLiveAt = Date.now(); }
       } else if (!shown) {
-        liveSet('near', o.hits[0].o, '번째?', '확인하는 중…', o.text, ''); shown = true; lastLiveAt = Date.now();
+        liveSet('near', o.hits[0].o, '번째?', '확인하는 중…', o.text, '', null, o.hits[0]); shown = true; lastLiveAt = Date.now();
       }
     });
     if (!shown && r.near) {
       var n = r.near;
-      liveSet('near', n.hit.o, '번째?', '확인 필요 · 비슷한 주소예요', n.text, '목록: ' + n.hit.a, function () { commit(n.hit, n.text, true); liveSet('ok', n.hit.o, '번째', '기록했어요', n.hit.a, ''); lastLiveAt = Date.now(); });
+      liveSet('near', n.hit.o, '번째?', '확인 필요 · 비슷한 주소예요', n.text, '목록: ' + n.hit.a, function () { commit(n.hit, n.text, true); liveSet('ok', n.hit.o, '번째', '기록했어요', n.hit.a, '', null, n.hit); lastLiveAt = Date.now(); }, n.hit);
       lastLiveAt = Date.now(); shown = true;
     }
     if (!shown) {
@@ -484,12 +638,14 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var arr = Array.from(found.entries()).sort(function (a, b) { return b[1].t - a[1].t; });
     if (!arr.length) { var p = document.createElement('p'); p.className = 'muted'; p.textContent = list.length ? '찾은 주소가 여기에 쌓입니다.' : '먼저 위에서 주소 목록을 올려 주세요.'; box.append(p); }
     arr.forEach(function (e) {
-      var d = document.createElement('div'); d.className = 'h' + (e[0] === newIdx ? ' new' : '');
+      var it = list[e[0]];
+      var d = document.createElement('div'); d.className = 'h' + (e[0] === newIdx ? ' new' : '') + (it && it.col ? ' col' : '');
+      if (it && it.col) d.style.setProperty('--cl', it.col);
       var n = document.createElement('div'); n.className = 'n'; n.textContent = e[1].o;
       var t = document.createElement('div'); t.className = 't';
       var a = document.createElement('div'); a.textContent = e[1].a;
-      var s = document.createElement('small'); s.textContent = pad(e[1].t.getHours()) + ':' + pad(e[1].t.getMinutes()) + ':' + pad(e[1].t.getSeconds());
-      t.append(a, s);
+      var s = document.createElement('small'); s.textContent = pad(e[1].t.getHours()) + ':' + pad(e[1].t.getMinutes()) + ':' + pad(e[1].t.getSeconds()) + colorTag(it);
+      var ex = extrasEl(it); t.append(a); if (ex) t.append(ex); t.append(s);
       var x = document.createElement('button'); x.textContent = '×'; x.setAttribute('aria-label', e[1].o + '번 기록 지우기');
       x.onclick = function () { found.delete(e[0]); streak = {}; renderHist(); };
       d.append(n, t, x); box.append(d);
@@ -497,9 +653,10 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var miss = []; list.forEach(function (it, i) { if (!found.has(i)) miss.push(it.o); });
     $('missing').textContent = miss.length ? (miss.slice(0, 300).join(', ') + (miss.length > 300 ? ' …외 ' + (miss.length - 300) + '개' : '')) : (list.length ? '모두 찾았어요.' : '');
   }
+  function listItem(e) { for (var i = 0; i < list.length; i++) if (list[i].o === e.o && list[i].a === e.a) return list[i]; return { x: [], col: '' }; }
   function sortedFound() { return Array.from(found.values()).sort(function (a, b) { var x = parseFloat(a.o), y = parseFloat(b.o); return (isNaN(x) ? 1e9 : x) - (isNaN(y) ? 1e9 : y); }); }
   $('copy').addEventListener('click', async function () {
-    var txt = sortedFound().map(function (e) { return e.o + '\t' + e.a; }).join('\n'); if (!txt) return;
+    var txt = sortedFound().map(function (e) { var it = listItem(e); return [e.o, e.a].concat((it.x || []).map(function (p) { return p[1]; })).concat(it.col ? [colorName(it.col)] : []).join('\t'); }).join('\n'); if (!txt) return;
     var b = this, old = b.textContent;
     try { await navigator.clipboard.writeText(txt); b.textContent = '복사했어요'; } catch (e) { b.textContent = '복사하지 못했어요'; }
     setTimeout(function () { b.textContent = old; }, 1600);
@@ -507,7 +664,12 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   $('save').addEventListener('click', function () {
     var rows = sortedFound(); if (!rows.length) return;
     try {
-      var aoa = [['순서', '주소', '판독 시각']].concat(rows.map(function (e) { return [e.o, e.a, pad(e.t.getHours()) + ':' + pad(e.t.getMinutes()) + ':' + pad(e.t.getSeconds())]; }));
+      var labels = [], anyCol = false;
+      rows.forEach(function (e) { var it = listItem(e); (it.x || []).forEach(function (p) { if (labels.indexOf(p[0]) < 0) labels.push(p[0]); }); if (it.col) anyCol = true; });
+      var aoa = [['순서', '주소'].concat(labels).concat(anyCol ? ['색'] : []).concat(['판독 시각'])].concat(rows.map(function (e) {
+        var it = listItem(e);
+        return [e.o, e.a].concat(labels.map(function (l) { var m = (it.x || []).filter(function (p) { return p[0] === l; })[0]; return m ? m[1] : ''; })).concat(anyCol ? [it.col ? colorName(it.col) : ''] : []).concat([pad(e.t.getHours()) + ':' + pad(e.t.getMinutes()) + ':' + pad(e.t.getSeconds())]);
+      }));
       var w = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(w, XLSX.utils.aoa_to_sheet(aoa), '스캔 결과'); XLSX.writeFile(w, '스캔결과.xlsx');
     } catch (e) { say('status', '엑셀 파일로 저장하지 못했어요. "결과 복사"를 써 보세요.', 'err'); }
   });
@@ -624,9 +786,11 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     if (!rs.length) { msg('목록에서 찾지 못했어요. 글자를 줄이거나 번지만 입력해 보세요.'); return; }
     rs.forEach(function (r) {
       var done = found.has(r.idx);
-      var d = document.createElement('div'); d.className = 'cand' + (done ? ' done' : '');
+      var d = document.createElement('div'); d.className = 'cand' + (done ? ' done' : '') + (r.it.col ? ' col' : '');
+      if (r.it.col) d.style.setProperty('--cl', r.it.col);
       var n = document.createElement('div'); n.className = 'n'; n.textContent = r.it.o;
-      var t = document.createElement('div'); t.className = 't'; t.textContent = r.it.a;
+      var t = document.createElement('div'); t.className = 't'; t.textContent = r.it.a + colorTag(r.it);
+      var ex = extrasEl(r.it); if (ex) t.append(ex);
       var b = document.createElement('button');
       if (done) { b.textContent = '기록됨 ✓'; b.disabled = true; }
       else { b.textContent = '기록'; b.onclick = function () { commit(r.it, q, true); renderCands(); }; }
