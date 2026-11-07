@@ -86,7 +86,7 @@ input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; po
 .status.err { color: var(--bad); } .status.warn { color: var(--warn); } .status.ok { color: var(--ok); }
 
 /* camera: overlay fractions map 1:1 to the video because the box takes the stream's aspect ratio */
-.cam { position: relative; width: min(100%, calc(60vh * var(--ar, 1.3333))); aspect-ratio: var(--ar, 1.3333); margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); max-width: 100%; }
+.cam { position: relative; width: min(100%, calc(40vh * var(--ar, 1.3333))); aspect-ratio: var(--ar, 1.3333); margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); max-width: 100%; }
 .cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .reticle { position: absolute; left: 4%; width: 92%; top: 35%; height: 30%; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.5); transition: border-color .15s, top .15s, height .15s; }
 .reticle.hit { border-color: var(--ok); }
