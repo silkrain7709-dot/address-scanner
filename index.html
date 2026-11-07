@@ -126,6 +126,16 @@ input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; po
 .h button { flex: none; min-height: 36px; width: 36px; padding: 0; font-size: 18px; }
 .h.new { animation: pop .5s ease-out; }
 @keyframes pop { from { background: var(--ok-bg); } }
+
+.manual { display: flex; gap: 8px; }
+.manual input { flex: 1; min-width: 0; min-height: 46px; font: 400 16px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; }
+.manual input::placeholder { color: var(--muted); }
+.manual button { flex: none; }
+.cand { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 8px 8px 12px; min-width: 0; }
+.cand .n { flex: none; min-width: 52px; text-align: right; font: 700 22px var(--font-mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+.cand.done .n { color: var(--ok); }
+.cand .t { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.cand button { flex: none; min-height: 36px; font-size: 13px; padding: 0 12px; }
 details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--muted); padding: 4px 0; }
 .missing { font: 400 13px/1.7 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 </style>
@@ -183,6 +193,15 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     <div class="status" id="status" role="status" aria-live="polite"></div>
   </section>
 
+  <section aria-labelledby="h-man">
+    <h2 id="h-man">주소 직접 입력</h2>
+    <div class="manual">
+      <input id="manual" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="예: 발안로 123">
+      <button class="primary" id="manualGo">찾기</button>
+    </div>
+    <div class="hist" id="cands"><p class="muted">주소 일부만 입력해도 목록에서 몇 번째인지 찾아 줍니다.</p></div>
+  </section>
+
   <section aria-labelledby="h-hist">
     <h2 id="h-hist">3. 찾은 기록</h2>
     <div class="tally"><span class="muted">목록에서 찾은 주소</span><span><b id="foundN">0</b> <span class="muted">/ <span id="totalN">0</span></span></span></div>
@@ -219,8 +238,8 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   function nums(s) { return (core(s).match(/\d+(?:-\d+)?/g) || []); }
   function grams(n) { var g = new Set(); for (var i = 0; i < n.length - 1; i++) g.add(n.substr(i, 2)); return g; }
   function dice(a, b) { if (!a.size || !b.size) return 0; var c = 0; a.forEach(function (x) { if (b.has(x)) c++; }); return 2 * c / (a.size + b.size); }
-  function bounded(h, nd) {
-    if (nd.length < 6 || nd.length > h.length) return false;
+  function bounded(h, nd, min) {
+    if (nd.length < (min || 6) || nd.length > h.length) return false;
     var i = h.indexOf(nd);
     while (i !== -1) {
       var b = h.charAt(i - 1), a = h.charAt(i + nd.length);
@@ -459,6 +478,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
 
   /* ---------- history ---------- */
   function renderHist(newIdx) {
+    if (typeof renderCands === 'function' && $('cands') && $('manual').value.trim()) { try { renderCands(); } catch (e) {} }
     $('foundN').textContent = String(found.size); $('totalN').textContent = String(list.length);
     var box = $('hist'); box.textContent = '';
     var arr = Array.from(found.entries()).sort(function (a, b) { return b[1].t - a[1].t; });
@@ -576,6 +596,46 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     URL.revokeObjectURL(url); busy = false;
   });
   ['xlsBtn', 'photoBtn'].forEach(function (id) { $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.click(); } }); });
+
+
+  /* ---------- manual typing ---------- */
+  function searchManual(q) {
+    var cs = core(q), n = cs.replace(/ /g, '');
+    if (n.length < 2) return [];
+    var g = grams(n), out = [];
+    list.forEach(function (it, idx) {
+      var sc = 0;
+      if (it.n === n) sc = 5;
+      else if (bounded(it.n, n, 2) || bounded(it.s, cs, 2)) sc = 4;
+      else if (it.n.indexOf(n) !== -1) sc = 3;
+      else if (n.length >= 6 && bounded(n, it.n)) sc = 4;
+      else { var d = dice(g, it.g); if (d >= 0.5) sc = d; }
+      if (sc) out.push({ it: it, idx: idx, sc: sc });
+    });
+    out.sort(function (a, b) { return b.sc - a.sc || a.idx - b.idx; });
+    return out.slice(0, 8);
+  }
+  function renderCands() {
+    var box = $('cands'), q = $('manual').value.trim(); box.textContent = '';
+    function msg(t) { var p = document.createElement('p'); p.className = 'muted'; p.textContent = t; box.append(p); }
+    if (!list.length) { msg('먼저 위에서 주소 목록을 올려 주세요.'); return; }
+    if (!q) { msg('주소 일부만 입력해도 목록에서 몇 번째인지 찾아 줍니다.'); return; }
+    var rs = searchManual(q);
+    if (!rs.length) { msg('목록에서 찾지 못했어요. 글자를 줄이거나 번지만 입력해 보세요.'); return; }
+    rs.forEach(function (r) {
+      var done = found.has(r.idx);
+      var d = document.createElement('div'); d.className = 'cand' + (done ? ' done' : '');
+      var n = document.createElement('div'); n.className = 'n'; n.textContent = r.it.o;
+      var t = document.createElement('div'); t.className = 't'; t.textContent = r.it.a;
+      var b = document.createElement('button');
+      if (done) { b.textContent = '기록됨 ✓'; b.disabled = true; }
+      else { b.textContent = '기록'; b.onclick = function () { commit(r.it, q, true); renderCands(); }; }
+      d.append(n, t, b); box.append(d);
+    });
+  }
+  var mt; $('manual').addEventListener('input', function () { clearTimeout(mt); mt = setTimeout(renderCands, 200); });
+  $('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderCands(); this.blur(); } });
+  $('manualGo').addEventListener('click', renderCands);
 
   applySize(); showList(); renderHist(); liveIdle(); initEngine();
 })();
