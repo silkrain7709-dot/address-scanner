@@ -88,6 +88,7 @@ input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; po
 /* camera: overlay fractions map 1:1 to the video because the box takes the stream's aspect ratio */
 .cam { position: relative; width: min(100%, calc(40vh * var(--ar, 1.3333))); aspect-ratio: var(--ar, 1.3333); margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); max-width: 100%; }
 .cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.cam.wide video { object-fit: cover; }
 .reticle { position: absolute; left: 4%; width: 92%; top: 35%; height: 30%; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.5); transition: border-color .15s, top .15s, height .15s; }
 .reticle.hit { border-color: var(--ok); }
 .reticle.near { border-color: var(--warn); }
@@ -200,6 +201,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     <div class="row">
       <button class="primary" id="toggle">스캔 시작</button>
       <button id="size">스캔 영역: 보통</button>
+      <button id="shape">화면: 원본</button>
     </div>
     <label class="btn small" for="photo" id="photoBtn" tabindex="0" role="button">사진 파일로 한 장 판독</label>
     <input id="photo" type="file" accept="image/*">
@@ -680,6 +682,11 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var s = SIZES[sizeIdx], r = $('ret'); r.style.height = (s.h * 100) + '%'; r.style.top = ((1 - s.h) / 2 * 100) + '%';
     $('size').textContent = '스캔 영역: ' + s.n;
   }
+  var wide = false; try { wide = localStorage.getItem('wide') === '1'; } catch (e) {}
+  function boxAR() { var v = $('v'); return wide ? 16 / 9 : (v.videoWidth ? v.videoWidth / v.videoHeight : 4 / 3); }
+  function setAR() { $('cam').style.setProperty('--ar', String(boxAR())); $('cam').classList.toggle('wide', wide); $('shape').textContent = wide ? '화면: 가로로 보기' : '화면: 원본'; }
+  $('shape').addEventListener('click', function () { wide = !wide; try { localStorage.setItem('wide', wide ? '1' : '0'); } catch (e) {} setAR(); lastSig = null; });
+  $('v').addEventListener('resize', setAR);
   $('size').addEventListener('click', function () { sizeIdx = (sizeIdx + 1) % SIZES.length; applySize(); lastSig = null; });
   async function startScan() {
     if (!list.length) { say('status', '먼저 위에서 주소 목록을 올려 주세요.', 'warn'); $('xlsBtn').focus(); return; }
@@ -698,7 +705,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var v = $('v'); v.srcObject = stream;
     try { await v.play(); } catch (e) {}
     await new Promise(function (res) { if (v.videoWidth) res(); else v.onloadedmetadata = function () { res(); }; });
-    $('cam').style.setProperty('--ar', String(v.videoWidth / v.videoHeight));
+    setAR();
     try {
       var tr = stream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {};
       if (caps.focusMode && caps.focusMode.indexOf('continuous') !== -1) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
@@ -726,7 +733,8 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     try {
       var v = $('v'), vw = v.videoWidth, vh = v.videoHeight;
       if (vw && vh) {
-        var fh = SIZES[sizeIdx].h, sw = vw * 0.92, sh = vh * fh;
+        var bar = boxAR(), visW = Math.min(vw, vh * bar), visH = Math.min(vh, vw / bar);
+        var sw = visW * 0.92, sh = visH * SIZES[sizeIdx].h;
         var sig = prepCanvas(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 1200);
         var still = sigDiff(sig, lastSig) < 2.5 && !Object.keys(streak).length;
         lastSig = sig;
@@ -801,7 +809,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   $('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderCands(); this.blur(); } });
   $('manualGo').addEventListener('click', renderCands);
 
-  applySize(); showList(); renderHist(); liveIdle(); initEngine();
+  applySize(); setAR(); showList(); renderHist(); liveIdle(); initEngine();
 })();
 </script>
 </body>
