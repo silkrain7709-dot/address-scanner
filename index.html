@@ -211,6 +211,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
       <button class="primary" id="toggle">스캔 시작</button>
       <button id="size">스캔 영역: 보통</button>
       <button id="shape">화면: 원본</button>
+      <button id="speed">속도: 빠르게</button>
     </div>
     <label class="btn small" for="photo" id="photoBtn" tabindex="0" role="button">사진 파일로 한 장 판독</label>
     <input id="photo" type="file" accept="image/*">
@@ -320,7 +321,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     for (var t = 0; t < tiers.length && !oks.length; t++) {
       tiers[t].forEach(function (c) {
         var m = matchLine(c); if (!m) return; any = true;
-        if (m.st === 'ok') { if (!oks.some(function (x) { return x.key === keyOf(m.hits); })) oks.push({ text: c, hits: m.hits, key: keyOf(m.hits) }); }
+        if (m.st === 'ok') { if (!oks.some(function (x) { return x.key === keyOf(m.hits); })) oks.push({ text: c, hits: m.hits, key: keyOf(m.hits), score: m.score }); }
         else if (m.st === 'near' && (!near || m.score > near.score)) near = { text: c, hit: m.hits[0], score: m.score };
       });
     }
@@ -679,14 +680,14 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   function handleText(text, once) {
     var r = analyze(text);
     var first = r.lines.slice(0, 2).join('  /  ');
-    $('readline').textContent = first || ' ';
+    $('readline').textContent = (first || ' ') + (lastMs && scanning ? '   · ' + (lastMs / 1000).toFixed(1) + '초' : '');
     var cur = {};
     r.oks.forEach(function (o) { cur[o.key] = o; });
     Object.keys(streak).forEach(function (k) { if (!cur[k]) delete streak[k]; });
     var shown = false;
     r.oks.forEach(function (o) {
       streak[o.key] = (streak[o.key] || 0) + 1;
-      if (streak[o.key] >= 2 || once) {
+      if (streak[o.key] >= ((o.score === 1 && speedIdx < 2) ? 1 : 2) || once) {
         var target = o.hits.find(function (h) { return !found.has(list.indexOf(h)); });
         var fresh = target ? commit(target, o.text) : false;
         if (!shown) { showOk(o, fresh); shown = true; lastLiveAt = Date.now(); }
@@ -755,6 +756,10 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var s = SIZES[sizeIdx], r = $('ret'); r.style.height = (s.h * 100) + '%'; r.style.top = ((1 - s.h) / 2 * 100) + '%';
     $('size').textContent = '스캔 영역: ' + s.n;
   }
+  var SPEEDS = [{ n: '빠르게', w: 720 }, { n: '보통', w: 960 }, { n: '정확하게', w: 1300 }], speedIdx = 0, lastMs = 0;
+  try { var sp = parseInt(localStorage.getItem('speed2'), 10); if (sp >= 0 && sp < SPEEDS.length) speedIdx = sp; } catch (e) {}
+  function applySpeed() { $('speed').textContent = '속도: ' + SPEEDS[speedIdx].n; }
+  $('speed').addEventListener('click', function () { speedIdx = (speedIdx + 1) % SPEEDS.length; try { localStorage.setItem('speed2', String(speedIdx)); } catch (e) {} applySpeed(); lastSig = null; });
   var wide = false; try { wide = localStorage.getItem('wide') === '1'; } catch (e) {}
   function boxAR() { var v = $('v'); return wide ? 16 / 9 : (v.videoWidth ? v.videoWidth / v.videoHeight : 4 / 3); }
   function setAR() { $('cam').style.setProperty('--ar', String(boxAR())); $('cam').classList.toggle('wide', wide); $('shape').textContent = wide ? '화면: 가로로 보기' : '화면: 원본'; }
@@ -808,17 +813,18 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
       if (vw && vh) {
         var bar = boxAR(), visW = Math.min(vw, vh * bar), visH = Math.min(vh, vw / bar);
         var sw = visW * 0.92, sh = visH * SIZES[sizeIdx].h;
-        var sig = prepCanvas(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 1200);
+        var sig = prepCanvas(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, SPEEDS[speedIdx].w);
         var still = sigDiff(sig, lastSig) < 2.5 && !Object.keys(streak).length;
         lastSig = sig;
         if (!still) {
-          var res = await worker.recognize(work);
+          var t0 = performance.now(), res = await worker.recognize(work);
+          lastMs = performance.now() - t0;
           if (scanning) handleText((res && res.data && res.data.text) || '', false);
         }
       }
     } catch (e) { say('status', '판독 중 문제가 생겼어요. 잠시 뒤 자동으로 다시 시도합니다.', 'warn'); }
     busy = false;
-    if (scanning) setTimeout(tick, 150);
+    if (scanning) setTimeout(tick, 40);
   }
 
   /* one still photo from a file */
@@ -882,7 +888,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   $('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderCands(); this.blur(); } });
   $('manualGo').addEventListener('click', renderCands);
 
-  applySize(); setAR(); renderMv(); showList(); renderHist(); liveIdle(); initEngine();
+  applySize(); applySpeed(); setAR(); renderMv(); showList(); renderHist(); liveIdle(); initEngine();
 })();
 </script>
 </body>
