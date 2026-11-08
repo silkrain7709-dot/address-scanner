@@ -33,6 +33,8 @@
   --warn: #F0B44C;
   --warn-bg: #33270F;
   --bad: #FF8A80;
+  --red: #FF4D4D;
+  --moved-bg: #3A1416;
   --font-body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -146,6 +148,13 @@ input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; po
 .chipbtn { min-height: 34px; font-size: 13px; padding: 0 12px; border-radius: 99px; }
 .chipbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
 .h.col, .cand.col { border-left: 6px solid var(--cl, transparent); }
+.mvbadge { display: inline-block; align-self: flex-start; font-size: 12px; font-weight: 700; color: #fff; background: #D92D2D; border-radius: 99px; padding: 1px 10px; margin-bottom: 3px; }
+.live.moved { border-left-color: var(--red); background: var(--moved-bg); }
+.live.moved .ord b, .live.moved .tag { color: var(--red); }
+.reticle.moved { border-color: var(--red); }
+.h.moved, .cand.moved { border-top-color: var(--red); border-right-color: var(--red); border-bottom-color: var(--red); background: var(--moved-bg); }
+.h.moved:not(.col), .cand.moved:not(.col) { border-left-color: var(--red); }
+.h.moved .n, .cand.moved .n { color: var(--red); }
 details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--muted); padding: 4px 0; }
 .missing { font: 400 13px/1.7 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 </style>
@@ -217,6 +226,18 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     <div class="hist" id="cands"><p class="muted">주소 일부만 입력해도 목록에서 몇 번째인지 찾아 줍니다.</p></div>
   </section>
 
+  <section aria-labelledby="h-mv">
+    <h2 id="h-mv">주소이전 등록</h2>
+    <p class="muted">이전된 주소를 등록하면, 스캔할 때 그 주소가 빨간색으로 표시돼요.</p>
+    <div class="manual">
+      <input id="mvInput" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="등록할 주소 검색 (예: 발안로 123)">
+      <button class="primary" id="mvGo">찾기</button>
+    </div>
+    <div class="hist" id="mvCands"></div>
+    <div class="tally"><span class="muted">등록된 주소</span><b id="mvCount">0</b></div>
+    <div class="hist" id="mvList"></div>
+  </section>
+
   <section aria-labelledby="h-hist">
     <h2 id="h-hist">3. 찾은 기록</h2>
     <div class="tally"><span class="muted">목록에서 찾은 주소</span><span><b id="foundN">0</b> <span class="muted">/ <span id="totalN">0</span></span></span></div>
@@ -237,6 +258,8 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var list = [], ctx = null, wb = null, listFileName = '', extraSel = new Set();
+  var moved = new Set(); try { moved = new Set(JSON.parse(localStorage.getItem('moved-addrs') || '[]')); } catch (e) { moved = new Set(); }
+  function dispName(n) { try { return decodeURIComponent(n); } catch (e) { return n; } }
   var found = new Map();          // list index -> {a, o, t}
   var worker = null, engineReady = false;
   var stream = null, scanning = false, busy = false, streak = {}, lastSig = null, lastLiveAt = 0, wake = null, audio = null;
@@ -414,7 +437,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' }).map(function (r) { return r.map(function (c) { return String(c).trim(); }); });
     var ncol = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0), hIdx = -1;
     for (var i = 0; i < Math.min(5, rows.length); i++) if (rows[i].some(function (c) { return /주소|address/i.test(c); })) { hIdx = i; break; }
-    var names = []; for (var c = 0; c < ncol; c++) names.push(hIdx >= 0 ? (rows[hIdx][c] || '') : '');
+    var names = [], samples = []; for (var c = 0; c < ncol; c++) { names.push(hIdx >= 0 ? (rows[hIdx][c] || '') : ''); samples.push((rows.slice(hIdx + 1).map(function (r) { return r[c] || ''; }).find(function (v) { return v !== ''; }) || '').slice(0, 8)); }
     var addrCol = -1, ordCol = -1;
     if (hIdx >= 0) {
       addrCol = names.findIndex(function (x) { return /주소|address/i.test(x); });
@@ -422,10 +445,17 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     }
     if (addrCol < 0) {
       var bl = -1;
-      for (var k = 0; k < ncol; k++) { var tot = 0; rows.slice(0, 50).forEach(function (r) { tot += (r[k] || '').length; }); if (tot > bl) { bl = tot; addrCol = k; } }
+      for (var k = 0; k < ncol; k++) { var tot = 0; rows.slice(0, 50).forEach(function (r) { if (/[가-힣]{2,}/.test(r[k] || '')) tot += r[k].length; }); if (tot > bl) { bl = tot; addrCol = k; } }
+    }
+    if (hIdx < 0 && ordCol < 0) {
+      for (var k2 = 0; k2 < ncol; k2++) {
+        if (k2 === addrCol) continue;
+        var vals = rows.map(function (r) { return r[k2] || ''; }).filter(function (v) { return v !== ''; });
+        if (vals.length >= 3 && vals.every(function (v) { return /^\d+$/.test(v); }) && vals.every(function (v, i) { return i === 0 || +v > +vals[i - 1]; })) { ordCol = k2; break; }
+      }
     }
     var rg = null; try { rg = XLSX.utils.decode_range(wb.Sheets[name]['!ref']); } catch (e) {}
-    ctx = { rows: rows, hIdx: hIdx, ncol: ncol, names: names, r0: rg ? rg.s.r : 0, c0: rg ? rg.s.c : 0, fills: null };
+    ctx = { rows: rows, hIdx: hIdx, ncol: ncol, names: names, samples: samples, r0: rg ? rg.s.r : 0, c0: rg ? rg.s.c : 0, fills: null };
     fillSelect($('addrCol'), addrCol); fillSelect($('ordCol'), ordCol, true);
     extraSel = new Set();
     for (var q = 0; q < ncol && extraSel.size < 3; q++) {
@@ -433,12 +463,13 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
       if (rows.slice(hIdx + 1).some(function (r) { return (r[q] || '') !== ''; })) extraSel.add(q);
     }
   }
+  function colLabel(c) { return colLetter(c) + '열' + (ctx.names[c] ? ' · ' + ctx.names[c] : ctx.samples && ctx.samples[c] ? ' · ' + ctx.samples[c] : ''); }
   function fillSelect(sel, val, withRow) {
     sel.textContent = '';
     if (withRow) { var o = document.createElement('option'); o.value = '-1'; o.textContent = '위에서부터 차례로'; sel.append(o); }
     for (var c = 0; c < ctx.ncol; c++) {
       var op = document.createElement('option'); op.value = String(c);
-      op.textContent = colLetter(c) + '열' + (ctx.names[c] ? ' · ' + ctx.names[c] : ''); sel.append(op);
+      op.textContent = colLabel(c); sel.append(op);
     }
     sel.value = String(val);
   }
@@ -457,7 +488,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
       if (c === a || c === oc) continue;
       (function (c) {
         var b = document.createElement('button'); b.type = 'button'; b.className = 'chipbtn';
-        b.textContent = colLetter(c) + '열' + (ctx.names[c] ? ' · ' + ctx.names[c] : '');
+        b.textContent = colLabel(c);
         b.setAttribute('aria-pressed', extraSel.has(c) ? 'true' : 'false');
         b.onclick = function () { if (extraSel.has(c)) extraSel.delete(c); else extraSel.add(c); buildList(true); };
         box.append(b);
@@ -474,7 +505,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     }
     list = items; if (keep !== true) found.clear(); streak = {};
     try { localStorage.setItem('addr-list', JSON.stringify({ name: listFileName, rows: list.map(function (it) { return [it.o, it.a, it.x, it.col]; }) })); } catch (e) {}
-    showList(); renderChips(); renderHist(); renderCands();
+    showList(); renderChips(); renderHist(); renderCands(); renderMv();
   }
   async function selectSheet(name) {
     parseSheet(name);
@@ -486,7 +517,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     $('noList').hidden = has; $('hasList').hidden = !has; $('listClear').hidden = !has; $('preview').hidden = !has; $('ctrls').hidden = !ctx; $('extraWrap').hidden = !ctx;
     $('xlsBtn').textContent = has ? '다른 파일로 바꾸기' : '엑셀 파일 올리기'; $('xlsBtn').classList.toggle('primary', !has);
     if (!has) return;
-    $('listName').textContent = listFileName || '저장된 목록';
+    $('listName').textContent = dispName(listFileName) || '저장된 목록';
     var nc = list.filter(function (it) { return it.col; }).length;
     $('listInfo').textContent = '주소 ' + list.length + '개 · 첫 주소가 ' + list[0].o + '번' + (nc ? ' · 색이 칠해진 주소 ' + nc + '개' : '');
     var tb = $('previewBody'); tb.textContent = '';
@@ -498,7 +529,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var fr = new FileReader();
     fr.onload = async function () {
       try {
-        wb = XLSX.read(fr.result, { type: 'array' }); listFileName = f.name;
+        wb = XLSX.read(fr.result, { type: 'array' }); listFileName = dispName(f.name);
         zip = null; try { zip = await openZip(fr.result); } catch (e) { zip = null; }
         var sh = $('sheet'); sh.textContent = '';
         wb.SheetNames.forEach(function (n) { var o = document.createElement('option'); o.value = n; o.textContent = n; sh.append(o); });
@@ -562,18 +593,56 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   }
   function sigDiff(a, b) { if (!a || !b) return 99; var s = 0; for (var i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; }
 
+  /* ---------- 주소이전 등록 (shown in red when scanned) ---------- */
+  function isMoved(it) { return !!it && moved.has(it.a); }
+  function saveMoved() { try { localStorage.setItem('moved-addrs', JSON.stringify(Array.from(moved))); } catch (e) {} }
+  function mvBadge() { var b = document.createElement('span'); b.className = 'mvbadge'; b.textContent = '주소이전 등록'; return b; }
+  function toggleMoved(addr) { if (moved.has(addr)) moved.delete(addr); else moved.add(addr); saveMoved(); renderMv(); renderCands(); renderHist(); }
+  function renderMv() {
+    var box = $('mvCands'), q = $('mvInput').value.trim(); box.textContent = '';
+    function msg(t) { var p = document.createElement('p'); p.className = 'muted'; p.textContent = t; box.append(p); }
+    if (q) {
+      if (!list.length) msg('먼저 위에서 주소 목록을 올려 주세요.');
+      else {
+        var rs = searchManual(q);
+        if (!rs.length) msg('목록에서 찾지 못했어요. 글자를 줄이거나 번지만 입력해 보세요.');
+        rs.forEach(function (r) {
+          var on = moved.has(r.it.a), d = document.createElement('div'); d.className = 'cand' + (on ? ' moved' : '');
+          var n = document.createElement('div'); n.className = 'n'; n.textContent = r.it.o;
+          var t = document.createElement('div'); t.className = 't'; t.textContent = r.it.a;
+          var b = document.createElement('button'); b.textContent = on ? '등록 해제' : '이전 등록'; b.onclick = function () { toggleMoved(r.it.a); };
+          d.append(n, t, b); box.append(d);
+        });
+      }
+    }
+    $('mvCount').textContent = String(moved.size);
+    var lb = $('mvList'); lb.textContent = '';
+    Array.from(moved).forEach(function (addr) {
+      var it = list.filter(function (x) { return x.a === addr; })[0];
+      var d = document.createElement('div'); d.className = 'cand moved';
+      var n = document.createElement('div'); n.className = 'n'; n.textContent = it ? it.o : '–';
+      var t = document.createElement('div'); t.className = 't'; t.textContent = addr + (it ? '' : '  (현재 목록에 없음)');
+      var b = document.createElement('button'); b.textContent = '해제'; b.onclick = function () { toggleMoved(addr); };
+      d.append(n, t, b); lb.append(d);
+    });
+  }
+  var mvt; $('mvInput').addEventListener('input', function () { clearTimeout(mvt); mvt = setTimeout(renderMv, 200); });
+  $('mvInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderMv(); this.blur(); } });
+  $('mvGo').addEventListener('click', renderMv);
+
   /* ---------- live results ---------- */
   function liveSet(cls, ord, unit, tag, addr, ref, acceptFn, item) {
-    var L = $('live'); L.className = 'live ' + cls; L.textContent = '';
+    var L = $('live'); L.className = 'live ' + cls + (isMoved(item) ? ' moved' : ''); L.textContent = '';
     if (ord) { var o = document.createElement('div'); o.className = 'ord'; var b = document.createElement('b'); b.textContent = ord; o.append(b); if (unit) { var s = document.createElement('span'); s.textContent = unit; o.append(s); } var sw = swatchEl(item); if (sw) o.append(sw); L.append(o); }
     var body = document.createElement('div'); body.className = 'body';
+    if (isMoved(item)) body.append(mvBadge());
     var t = document.createElement('div'); t.className = 'tag'; t.textContent = tag; body.append(t);
     if (addr) { var a = document.createElement('div'); a.className = 'addr'; a.textContent = addr; body.append(a); }
     if (ref) { var r = document.createElement('div'); r.className = 'refaddr'; r.textContent = ref; body.append(r); }
     var ex = extrasEl(item); if (ex) body.append(ex);
     if (acceptFn) { var bt = document.createElement('button'); bt.className = 'accept'; bt.textContent = '맞아요, 기록하기'; bt.onclick = acceptFn; body.append(bt); }
     L.append(body);
-    $('ret').className = 'reticle' + (cls === 'ok' ? ' hit' : cls === 'near' ? ' near' : '');
+    $('ret').className = 'reticle' + (isMoved(item) ? ' moved' : cls === 'ok' ? ' hit' : cls === 'near' ? ' near' : '');
   }
   function liveIdle() {
     $('live').className = 'live idle'; $('live').textContent = '';
@@ -582,21 +651,25 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var m = document.createElement('div'); m.className = 'muted'; m.textContent = '글자가 또렷하고 반듯하게 보이면 자동으로 찾습니다.';
     b.append(t, m); $('live').append(b); $('ret').className = 'reticle';
   }
-  function beep() {
+  function beep(strong) {
     try {
-      if (!audio) return;
-      var o = audio.createOscillator(), g = audio.createGain();
-      o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(audio.destination);
-      o.start(); o.stop(audio.currentTime + 0.12);
+      if (audio) {
+        var tones = strong ? [0, 0.2] : [0];
+        tones.forEach(function (dt) {
+          var o = audio.createOscillator(), g = audio.createGain();
+          o.frequency.value = strong ? 520 : 880; g.gain.value = 0.15; o.connect(g); g.connect(audio.destination);
+          o.start(audio.currentTime + dt); o.stop(audio.currentTime + dt + 0.14);
+        });
+      }
     } catch (e) {}
-    try { if (navigator.vibrate) navigator.vibrate(70); } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(strong ? [120, 60, 120] : 70); } catch (e) {}
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function commit(hit, readText, manual) {
     var idx = list.indexOf(hit);
     if (idx < 0 || found.has(idx)) return false;
     found.set(idx, { o: hit.o, a: hit.a, t: new Date(), read: readText });
-    beep(); renderHist(idx); return true;
+    beep(isMoved(hit)); renderHist(idx); return true;
   }
   function showOk(entry, justNow) {
     var os = entry.hits.map(function (h) { return h.o; });
@@ -641,13 +714,13 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     if (!arr.length) { var p = document.createElement('p'); p.className = 'muted'; p.textContent = list.length ? '찾은 주소가 여기에 쌓입니다.' : '먼저 위에서 주소 목록을 올려 주세요.'; box.append(p); }
     arr.forEach(function (e) {
       var it = list[e[0]];
-      var d = document.createElement('div'); d.className = 'h' + (e[0] === newIdx ? ' new' : '') + (it && it.col ? ' col' : '');
+      var d = document.createElement('div'); d.className = 'h' + (e[0] === newIdx ? ' new' : '') + (it && it.col ? ' col' : '') + (isMoved(it) ? ' moved' : '');
       if (it && it.col) d.style.setProperty('--cl', it.col);
       var n = document.createElement('div'); n.className = 'n'; n.textContent = e[1].o;
       var t = document.createElement('div'); t.className = 't';
       var a = document.createElement('div'); a.textContent = e[1].a;
       var s = document.createElement('small'); s.textContent = pad(e[1].t.getHours()) + ':' + pad(e[1].t.getMinutes()) + ':' + pad(e[1].t.getSeconds()) + colorTag(it);
-      var ex = extrasEl(it); t.append(a); if (ex) t.append(ex); t.append(s);
+      var ex = extrasEl(it); if (isMoved(it)) t.append(mvBadge()); t.append(a); if (ex) t.append(ex); t.append(s);
       var x = document.createElement('button'); x.textContent = '×'; x.setAttribute('aria-label', e[1].o + '번 기록 지우기');
       x.onclick = function () { found.delete(e[0]); streak = {}; renderHist(); };
       d.append(n, t, x); box.append(d);
@@ -658,7 +731,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   function listItem(e) { for (var i = 0; i < list.length; i++) if (list[i].o === e.o && list[i].a === e.a) return list[i]; return { x: [], col: '' }; }
   function sortedFound() { return Array.from(found.values()).sort(function (a, b) { var x = parseFloat(a.o), y = parseFloat(b.o); return (isNaN(x) ? 1e9 : x) - (isNaN(y) ? 1e9 : y); }); }
   $('copy').addEventListener('click', async function () {
-    var txt = sortedFound().map(function (e) { var it = listItem(e); return [e.o, e.a].concat((it.x || []).map(function (p) { return p[1]; })).concat(it.col ? [colorName(it.col)] : []).join('\t'); }).join('\n'); if (!txt) return;
+    var txt = sortedFound().map(function (e) { var it = listItem(e); return [e.o, e.a].concat((it.x || []).map(function (p) { return p[1]; })).concat(it.col ? [colorName(it.col)] : []).concat(isMoved(it) ? ['주소이전'] : []).join('\t'); }).join('\n'); if (!txt) return;
     var b = this, old = b.textContent;
     try { await navigator.clipboard.writeText(txt); b.textContent = '복사했어요'; } catch (e) { b.textContent = '복사하지 못했어요'; }
     setTimeout(function () { b.textContent = old; }, 1600);
@@ -666,11 +739,11 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   $('save').addEventListener('click', function () {
     var rows = sortedFound(); if (!rows.length) return;
     try {
-      var labels = [], anyCol = false;
-      rows.forEach(function (e) { var it = listItem(e); (it.x || []).forEach(function (p) { if (labels.indexOf(p[0]) < 0) labels.push(p[0]); }); if (it.col) anyCol = true; });
-      var aoa = [['순서', '주소'].concat(labels).concat(anyCol ? ['색'] : []).concat(['판독 시각'])].concat(rows.map(function (e) {
+      var labels = [], anyCol = false, anyMv = false;
+      rows.forEach(function (e) { var it = listItem(e); (it.x || []).forEach(function (p) { if (labels.indexOf(p[0]) < 0) labels.push(p[0]); }); if (it.col) anyCol = true; if (isMoved(it)) anyMv = true; });
+      var aoa = [['순서', '주소'].concat(labels).concat(anyCol ? ['색'] : []).concat(anyMv ? ['주소이전'] : []).concat(['판독 시각'])].concat(rows.map(function (e) {
         var it = listItem(e);
-        return [e.o, e.a].concat(labels.map(function (l) { var m = (it.x || []).filter(function (p) { return p[0] === l; })[0]; return m ? m[1] : ''; })).concat(anyCol ? [it.col ? colorName(it.col) : ''] : []).concat([pad(e.t.getHours()) + ':' + pad(e.t.getMinutes()) + ':' + pad(e.t.getSeconds())]);
+        return [e.o, e.a].concat(labels.map(function (l) { var m = (it.x || []).filter(function (p) { return p[0] === l; })[0]; return m ? m[1] : ''; })).concat(anyCol ? [it.col ? colorName(it.col) : ''] : []).concat(anyMv ? [isMoved(it) ? '등록' : ''] : []).concat([pad(e.t.getHours()) + ':' + pad(e.t.getMinutes()) + ':' + pad(e.t.getSeconds())]);
       }));
       var w = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(w, XLSX.utils.aoa_to_sheet(aoa), '스캔 결과'); XLSX.writeFile(w, '스캔결과.xlsx');
     } catch (e) { say('status', '엑셀 파일로 저장하지 못했어요. "결과 복사"를 써 보세요.', 'err'); }
@@ -794,10 +867,10 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     if (!rs.length) { msg('목록에서 찾지 못했어요. 글자를 줄이거나 번지만 입력해 보세요.'); return; }
     rs.forEach(function (r) {
       var done = found.has(r.idx);
-      var d = document.createElement('div'); d.className = 'cand' + (done ? ' done' : '') + (r.it.col ? ' col' : '');
+      var d = document.createElement('div'); d.className = 'cand' + (done ? ' done' : '') + (r.it.col ? ' col' : '') + (moved.has(r.it.a) ? ' moved' : '');
       if (r.it.col) d.style.setProperty('--cl', r.it.col);
       var n = document.createElement('div'); n.className = 'n'; n.textContent = r.it.o;
-      var t = document.createElement('div'); t.className = 't'; t.textContent = r.it.a + colorTag(r.it);
+      var t = document.createElement('div'); t.className = 't'; t.textContent = r.it.a + colorTag(r.it); if (moved.has(r.it.a)) t.prepend(mvBadge());
       var ex = extrasEl(r.it); if (ex) t.append(ex);
       var b = document.createElement('button');
       if (done) { b.textContent = '기록됨 ✓'; b.disabled = true; }
@@ -809,7 +882,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   $('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderCands(); this.blur(); } });
   $('manualGo').addEventListener('click', renderCands);
 
-  applySize(); setAR(); showList(); renderHist(); liveIdle(); initEngine();
+  applySize(); setAR(); renderMv(); showList(); renderHist(); liveIdle(); initEngine();
 })();
 </script>
 </body>
