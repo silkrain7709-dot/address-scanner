@@ -223,6 +223,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     <div class="manual">
       <input id="manual" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="예: 발안로 123">
       <button class="primary" id="manualGo">찾기</button>
+      <button id="manualClr">삭제</button>
     </div>
     <div class="hist" id="cands"><p class="muted">주소 일부만 입력해도 목록에서 몇 번째인지 찾아 줍니다.</p></div>
   </section>
@@ -233,6 +234,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     <div class="manual">
       <input id="mvInput" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="등록할 주소 검색 (예: 발안로 123)">
       <button class="primary" id="mvGo">찾기</button>
+      <button id="mvClr">삭제</button>
     </div>
     <div class="hist" id="mvCands"></div>
     <div class="tally"><span class="muted">등록된 주소</span><b id="mvCount">0</b></div>
@@ -630,6 +632,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   var mvt; $('mvInput').addEventListener('input', function () { clearTimeout(mvt); mvt = setTimeout(renderMv, 200); });
   $('mvInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderMv(); this.blur(); } });
   $('mvGo').addEventListener('click', renderMv);
+  $('mvClr').addEventListener('click', function () { $('mvInput').value = ''; renderMv(); $('mvInput').focus(); });
 
   /* ---------- live results ---------- */
   function liveSet(cls, ord, unit, tag, addr, ref, acceptFn, item) {
@@ -887,6 +890,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   var mt; $('manual').addEventListener('input', function () { clearTimeout(mt); mt = setTimeout(renderCands, 200); });
   $('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderCands(); this.blur(); } });
   $('manualGo').addEventListener('click', renderCands);
+  $('manualClr').addEventListener('click', function () { $('manual').value = ''; renderCands(); $('manual').focus(); });
 
   applySize(); applySpeed(); setAR(); renderMv(); showList(); renderHist(); liveIdle(); initEngine();
 })();
