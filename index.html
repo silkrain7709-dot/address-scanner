@@ -212,6 +212,7 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
       <button id="size">스캔 영역: 보통</button>
       <button id="shape">화면: 원본</button>
       <button id="speed">속도: 빠르게</button>
+      <button id="vol">소리: 보통</button>
     </div>
     <label class="btn small" for="photo" id="photoBtn" tabindex="0" role="button">사진 파일로 한 장 판독</label>
     <input id="photo" type="file" accept="image/*">
@@ -655,13 +656,15 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
     var m = document.createElement('div'); m.className = 'muted'; m.textContent = '글자가 또렷하고 반듯하게 보이면 자동으로 찾습니다.';
     b.append(t, m); $('live').append(b); $('ret').className = 'reticle';
   }
+  var VOLS = [{n:'끔',g:0},{n:'작게',g:0.03},{n:'보통',g:0.12},{n:'크게',g:0.4}], volIdx = 2;
+  try { var vv = parseInt(localStorage.getItem('vol1'), 10); if (vv >= 0 && vv < VOLS.length) volIdx = vv; } catch (e) {}
   function beep(strong) {
     try {
-      if (audio) {
+      if (audio && VOLS[volIdx].g > 0) {
         var tones = strong ? [0, 0.2] : [0];
         tones.forEach(function (dt) {
           var o = audio.createOscillator(), g = audio.createGain();
-          o.frequency.value = strong ? 520 : 880; g.gain.value = 0.15; o.connect(g); g.connect(audio.destination);
+          o.frequency.value = strong ? 520 : 880; g.gain.value = VOLS[volIdx].g; o.connect(g); g.connect(audio.destination);
           o.start(audio.currentTime + dt); o.stop(audio.currentTime + dt + 0.14);
         });
       }
@@ -763,6 +766,9 @@ details summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var
   try { var sp = parseInt(localStorage.getItem('speed2'), 10); if (sp >= 0 && sp < SPEEDS.length) speedIdx = sp; } catch (e) {}
   function applySpeed() { $('speed').textContent = '속도: ' + SPEEDS[speedIdx].n; }
   $('speed').addEventListener('click', function () { speedIdx = (speedIdx + 1) % SPEEDS.length; try { localStorage.setItem('speed2', String(speedIdx)); } catch (e) {} applySpeed(); lastSig = null; });
+  function applyVol() { $('vol').textContent = '소리: ' + VOLS[volIdx].n; }
+  applyVol();
+  $('vol').addEventListener('click', function () { volIdx = (volIdx + 1) % VOLS.length; try { localStorage.setItem('vol1', String(volIdx)); } catch (e) {} applyVol(); try { if (audio && audio.state === 'suspended') audio.resume(); } catch (e) {} beep(false); });
   var wide = false; try { wide = localStorage.getItem('wide') === '1'; } catch (e) {}
   function boxAR() { var v = $('v'); return wide ? 16 / 9 : (v.videoWidth ? v.videoWidth / v.videoHeight : 4 / 3); }
   function setAR() { $('cam').style.setProperty('--ar', String(boxAR())); $('cam').classList.toggle('wide', wide); $('shape').textContent = wide ? '화면: 가로로 보기' : '화면: 원본'; }
