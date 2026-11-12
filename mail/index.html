@@ -98,7 +98,10 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     <button id="vol">소리: 보통</button>
     <button id="shape">화면: 원본</button>
   </div>
-  <label class="btn" for="photo" id="photoBtn" tabindex="0" role="button" style="min-height:30px;font-size:12px">안 읽히면: 사진으로 읽기</label>
+  <div class="ctrls" style="grid-template-columns:1fr 1fr">
+    <button id="ocrBtn" style="min-height:30px;font-size:12px">번호 보조: 켬</button>
+    <label class="btn" for="photo" id="photoBtn" tabindex="0" role="button" style="min-height:30px;font-size:12px">안 읽히면: 사진으로 읽기</label>
+  </div>
   <input id="photo" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
   <div class="status" id="status" role="status"></div>
 
@@ -286,12 +289,61 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     try {
       var bmp = await createImageBitmap(f), raw = await readSource(bmp, bmp.width, bmp.height, null);
       if (!raw) raw = await readSource(bmp, bmp.width, bmp.height, [0, 0.15, 1, 0.7]);
-      if (raw) { say(''); register(raw, true); } else { say('사진에서 바코드를 못 찾았어요. 바코드가 크게, 흔들리지 않게 찍어 주세요.', 'err'); }
+      if (!raw && ocrOn) { try { var num = await ocrNumber(bmp, bmp.width, bmp.height, null); if (num) raw = num; } catch (e2) {} }
+      if (raw) { say(''); register(raw, true); } else { say('사진에서 바코드나 번호를 못 찾았어요. 크게, 흔들리지 않게 찍어 주세요.', 'err'); }
     } catch (err) { say('사진을 열 수 없어요.', 'err'); }
   });
 
+  /* ---------- 번호 보조: when no barcode is found for a few seconds, read the printed 13-digit number instead ---------- */
+  var ocrOn = load('mail-ocr', '1') === '1', tess = null, tessLoading = null, ocrLast = '', ocrCount = 0, lastOcrAt = 0, ocrCv = document.createElement('canvas');
+  function setOcrBtn() { $('ocrBtn').textContent = '번호 보조: ' + (ocrOn ? '켬' : '끔'); }
+  $('ocrBtn').addEventListener('click', function () { ocrOn = !ocrOn; save('mail-ocr', ocrOn ? '1' : '0'); setOcrBtn(); ocrLast = ''; ocrCount = 0; });
+  setOcrBtn();
+  function loadTess() {
+    if (tess) return Promise.resolve(tess);
+    if (tessLoading) return tessLoading;
+    tessLoading = new Promise(function (res, rej) {
+      function mk() { window.Tesseract.createWorker('eng').then(function (w) { return w.setParameters({ tessedit_char_whitelist: '0123456789 ', tessedit_pageseg_mode: '6' }).then(function () { tess = w; res(w); }); }).catch(rej); }
+      if (window.Tesseract) return mk();
+      var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'; sc.onload = mk; sc.onerror = function () { rej(new Error('load')); }; document.head.append(sc);
+    }).catch(function (e) { tessLoading = null; throw e; });
+    return tessLoading;
+  }
+  function pick13(text) {
+    var lines = String(text || '').split(/\n/), i, d;
+    for (i = 0; i < lines.length; i++) { d = lines[i].replace(/\D/g, ''); var m = d.match(/\d{13}/); if (m) return m[0]; }
+    d = String(text || '').replace(/\D/g, ''); var m2 = d.match(/\d{13}/); return m2 ? m2[0] : null;
+  }
+  async function ocrNumber(src, sw, sh, region) {
+    var w = await loadTess();
+    var rx = region ? region[0] * sw : 0, ry = region ? region[1] * sh : 0, rw = region ? region[2] * sw : sw, rh = region ? region[3] * sh : sh;
+    var sc = Math.min(1.5, 1400 / Math.max(rw, rh)); ocrCv.width = Math.max(1, Math.round(rw * sc)); ocrCv.height = Math.max(1, Math.round(rh * sc));
+    var c2 = ocrCv.getContext('2d', { willReadFrequently: true }); c2.drawImage(src, rx, ry, rw, rh, 0, 0, ocrCv.width, ocrCv.height);
+    var im = c2.getImageData(0, 0, ocrCv.width, ocrCv.height), p = im.data, hist = new Uint32Array(256), i, g;
+    for (i = 0; i < p.length; i += 4) { g = (p[i] * 77 + p[i + 1] * 150 + p[i + 2] * 29) >> 8; p[i] = g; hist[g]++; }
+    var n = ocrCv.width * ocrCv.height, lo = 0, hi = 255, acc = 0;
+    while (lo < 255 && acc + hist[lo] < n * 0.02) acc += hist[lo++];
+    acc = 0; while (hi > 0 && acc + hist[hi] < n * 0.02) acc += hist[hi--];
+    var span = Math.max(40, hi - lo);
+    for (i = 0; i < p.length; i += 4) { g = Math.max(0, Math.min(255, ((p[i] - lo) * 255) / span)); p[i] = p[i + 1] = p[i + 2] = g; }
+    c2.putImageData(im, 0, 0);
+    var r = await w.recognize(ocrCv); return pick13(r && r.data && r.data.text);
+  }
+  async function ocrStep(video) {      // called by the scan loop while no barcode is being found
+    var now = Date.now(); if (now - lastOcrAt < 900) return; lastOcrAt = now;
+    var num;
+    try { num = await ocrNumber(video, video.videoWidth, video.videoHeight, REGION); } catch (e) { say('번호 읽는 엔진을 못 불러왔어요. 인터넷을 확인해 주세요.', 'err'); return; }
+    if (!scanning) return;
+    if (!num) { ocrLast = ''; ocrCount = 0; return; }
+    if (num === lastSeen && Date.now() - lastSeenAt < 4000) { lastSeenAt = Date.now(); return; }   // same slip still in view: already handled
+    if (where(num)) { ocrLast = ''; ocrCount = 0; register(num, false); lastSeen = num; lastSeenAt = Date.now(); noBarcodeSince = Date.now(); return; }   // already on the list: say so at once
+    if (num === ocrLast) ocrCount++; else { ocrLast = num; ocrCount = 1; }
+    if (ocrCount >= 2) { ocrLast = ''; ocrCount = 0; register(num, false); lastSeen = num; lastSeenAt = Date.now(); noBarcodeSince = Date.now(); }
+    else setLive('', '번호를 확인하는 중… 한 번 더 읽으면 등록돼요', num);
+  }
+
   /* ---------- camera ---------- */
-  var stream = null, scanning = false, busy = false, wake = null, lastSeen = '', lastSeenAt = 0, wide = load('mail-wide', '0') === '1';
+  var stream = null, scanning = false, busy = false, wake = null, lastSeen = '', lastSeenAt = 0, noBarcodeSince = 0, wide = load('mail-wide', '0') === '1';
   function setAR() {
     var v = $('v'), ar = wide ? 16 / 9 : ((v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : 16 / 9);
     $('cam').style.setProperty('--ar', String(ar)); v.style.objectFit = wide ? 'cover' : 'contain'; $('shape').textContent = wide ? '화면: 가로로 보기' : '화면: 원본';
@@ -307,8 +359,8 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
         if (raw) {
           var now = Date.now();
           if (raw !== lastSeen || now - lastSeenAt > 2500) { register(raw, false); }   // the same code held in view is not re-announced every frame
-          lastSeen = raw; lastSeenAt = now;
-        }
+          lastSeen = raw; lastSeenAt = now; noBarcodeSince = now; ocrLast = ''; ocrCount = 0;
+        } else if (ocrOn && Date.now() - noBarcodeSince > 2500) { await ocrStep(v); }
       } catch (e) {} finally { busy = false; }
     }
     setTimeout(tick, delay);
@@ -325,7 +377,7 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     var v = $('v'); v.srcObject = stream; v.setAttribute('playsinline', ''); try { await v.play(); } catch (e) {}
     v.onloadedmetadata = setAR; setAR();
     try { var tr = stream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {}; if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
-    $('cam').classList.add('on'); scanning = true; $('toggle').textContent = '스캔 멈춤'; $('toggle').className = 'stop'; say('');
+    $('cam').classList.add('on'); scanning = true; noBarcodeSince = Date.now(); ocrLast = ''; ocrCount = 0; $('toggle').textContent = '스캔 멈춤'; $('toggle').className = 'stop'; say('');
     try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
     setLive('', '바코드를 네모 안에 맞춰 주세요'); tick();
   }
