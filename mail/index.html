@@ -13,6 +13,7 @@
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/barcode-detector@3/dist/iife/ponyfill.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <style>
 :root {
@@ -37,6 +38,7 @@ h1 { font-size: 17px; margin: 0; }
 .muted { color: var(--muted); font-size: 12px; margin: 0; }
 button { font: 500 13px var(--font-body); min-height: 34px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
 button:disabled { opacity: .45; }
+.btn { font: 500 13px var(--font-body); border-radius: 8px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); cursor: pointer; display: flex; align-items: center; justify-content: center; text-align: center; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-weight: 700; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
@@ -96,6 +98,8 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     <button id="vol">소리: 보통</button>
     <button id="shape">화면: 원본</button>
   </div>
+  <label class="btn" for="photo" id="photoBtn" tabindex="0" role="button" style="min-height:30px;font-size:12px">안 읽히면: 사진으로 읽기</label>
+  <input id="photo" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
   <div class="status" id="status" role="status"></div>
 
   <div class="manual">
@@ -233,27 +237,37 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     CATS.forEach(function (c) { data[c.k] = []; }); persist(); renderCats(); renderList(); setLive('', '지웠어요');
   });
 
-  /* ---------- barcode engine ---------- */
-  var native = null, zx = null, engineReady = false;
-  function initEngine() {
-    try {
-      if ('BarcodeDetector' in window) { native = new BarcodeDetector({ formats: ['code_128', 'code_39', 'itf', 'ean_13', 'codabar'] }); }
-    } catch (e) { native = null; }
-    if (!native) {
-      if (!window.ZXing) { $('engine').className = 'chip err'; $('engine').textContent = '엔진 불러오기 실패'; say('바코드 읽는 엔진을 못 불러왔어요. 인터넷을 확인하고 새로고침해 주세요.', 'err'); return; }
+  /* ---------- barcode engine ----------
+     1) the phone's own BarcodeDetector when it exists, 2) zxing-wasm (strong C++ decoder) via the barcode-detector package,
+     3) the older pure-JS ZXing as a last resort. */
+  var det = null, zx = null, engineName = '', engineReady = false;
+  var FORMATS = ['code_128', 'code_39', 'code_93', 'itf', 'codabar', 'ean_13', 'ean_8', 'upc_a', 'upc_e'];
+  function makeDet(Cls) { try { return new Cls({ formats: FORMATS }); } catch (e) { try { return new Cls(); } catch (e2) { return null; } } }
+  async function initEngine() {
+    var tiny = document.createElement('canvas'); tiny.width = tiny.height = 8;
+    var cands = [];
+    if ('BarcodeDetector' in window) cands.push(['기기 내장', window.BarcodeDetector]);
+    if (window.BarcodeDetectionAPI && window.BarcodeDetectionAPI.BarcodeDetector) cands.push(['wasm', window.BarcodeDetectionAPI.BarcodeDetector]);
+    for (var i = 0; i < cands.length && !det; i++) {
+      var d = makeDet(cands[i][1]); if (!d) continue;
+      try { await d.detect(tiny); det = d; engineName = cands[i][0]; } catch (e) { /* wasm could not load: try the next one */ }
+    }
+    if (!det && window.ZXing) {
       var Z = window.ZXing, hints = new Map();
       hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.CODABAR]);
       hints.set(Z.DecodeHintType.TRY_HARDER, true);
-      zx = new Z.MultiFormatReader(); zx.setHints(hints);
+      zx = new Z.MultiFormatReader(); zx.setHints(hints); engineName = 'js';
     }
+    if (!det && !zx) { $('engine').className = 'chip err'; $('engine').textContent = '엔진 불러오기 실패'; say('바코드 읽는 엔진을 못 불러왔어요. 인터넷을 확인하고 새로고침해 주세요.', 'err'); return; }
     engineReady = true; $('engine').className = 'chip ready'; $('engine').textContent = '스캔 준비 완료';
   }
   var cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
-  async function readFrame(video) {
-    if (native) { var r = await native.detect(video); return r && r.length ? r[0].rawValue : null; }
-    var w = video.videoWidth, h = video.videoHeight; if (!w || !h) return null;
-    var sc = Math.min(1, 1280 / Math.max(w, h)); cv.width = Math.round(w * sc); cv.height = Math.round(h * sc);
-    cx.drawImage(video, 0, 0, cv.width, cv.height);
+  // src: video or image element; region = fractions of the source to look at (null = all). Big sources are scaled so bars stay crisp but cost stays low.
+  async function readSource(src, sw, sh, region) {
+    var rx = region ? region[0] * sw : 0, ry = region ? region[1] * sh : 0, rw = region ? region[2] * sw : sw, rh = region ? region[3] * sh : sh;
+    var sc = Math.min(1, 1600 / Math.max(rw, rh)); cv.width = Math.max(1, Math.round(rw * sc)); cv.height = Math.max(1, Math.round(rh * sc));
+    cx.drawImage(src, rx, ry, rw, rh, 0, 0, cv.width, cv.height);
+    if (det) { var r = await det.detect(cv); return r && r.length ? r[0].rawValue : null; }
     var px = cx.getImageData(0, 0, cv.width, cv.height).data, lum = new Uint8ClampedArray(cv.width * cv.height);
     for (var i = 0, j = 0; i < px.length; i += 4, j++) lum[j] = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 8;
     try {
@@ -261,6 +275,20 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
       return zx.decode(bmp).getText();
     } catch (e) { return null; }     // NotFoundException = no barcode in this frame
   }
+  var REGION = [0.02, 0.2, 0.96, 0.6];   // slightly larger than the on-screen box
+  async function readFrame(video) { if (!video.videoWidth) return null; return readSource(video, video.videoWidth, video.videoHeight, REGION); }
+
+  /* a photo taken with the phone's own camera app (sharper, real autofocus) as a fallback */
+  $('photo').addEventListener('change', async function (e) {
+    var f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return;
+    if (!engineReady) { say('엔진이 아직 준비 중이에요.', 'err'); return; }
+    say('사진을 읽는 중…');
+    try {
+      var bmp = await createImageBitmap(f), raw = await readSource(bmp, bmp.width, bmp.height, null);
+      if (!raw) raw = await readSource(bmp, bmp.width, bmp.height, [0, 0.15, 1, 0.7]);
+      if (raw) { say(''); register(raw, true); } else { say('사진에서 바코드를 못 찾았어요. 바코드가 크게, 흔들리지 않게 찍어 주세요.', 'err'); }
+    } catch (err) { say('사진을 열 수 없어요.', 'err'); }
+  });
 
   /* ---------- camera ---------- */
   var stream = null, scanning = false, busy = false, wake = null, lastSeen = '', lastSeenAt = 0, wide = load('mail-wide', '0') === '1';
@@ -296,6 +324,7 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     } catch (e) { say('카메라를 켤 수 없어요. 설정에서 카메라 권한을 허용해 주세요. (https 주소로 열어야 해요)', 'err'); return; }
     var v = $('v'); v.srcObject = stream; v.setAttribute('playsinline', ''); try { await v.play(); } catch (e) {}
     v.onloadedmetadata = setAR; setAR();
+    try { var tr = stream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {}; if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
     $('cam').classList.add('on'); scanning = true; $('toggle').textContent = '스캔 멈춤'; $('toggle').className = 'stop'; say('');
     try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
     setLive('', '바코드를 네모 안에 맞춰 주세요'); tick();
