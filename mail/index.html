@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>등기 스캐너</title>
+<meta name="theme-color" content="#0B1211">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="등기스캐너">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0B1211; --surface: #141E1D; --surface2: #1B2827; --ink: #E6EEED; --muted: #8FA3A0; --line: #263634;
+  --accent: #F2A33A; --accent-ink: #231500; --ok: #5BD08A; --ok-bg: #12301F; --warn: #F0B44C; --warn-bg: #33270F; --bad: #FF8A80;
+  --c0: #5CCFCB; --c1: #7FB2FF; --c2: #C79BFF; --c3: #FF8A80; --c4: #F0B44C;
+  --font-body: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 14px/1.4 var(--font-body);
+  padding-block: max(8px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(10px, env(safe-area-inset-left, 0px)); padding-right: max(10px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+h1 { font-size: 17px; margin: 0; }
+.chip { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; background: var(--surface2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.chip.ready { color: var(--ok); border-color: var(--ok); } .chip.err { color: var(--bad); border-color: var(--bad); } .chip.busy { color: var(--warn); border-color: var(--warn); }
+.muted { color: var(--muted); font-size: 12px; margin: 0; }
+button { font: 500 13px var(--font-body); min-height: 34px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+button:disabled { opacity: .45; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-weight: 700; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.cam { position: relative; width: min(100%, calc(32vh * var(--ar, 1.7778))); aspect-ratio: var(--ar, 1.7778); margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); max-width: 100%; }
+.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.reticle { position: absolute; left: 6%; width: 88%; top: 30%; height: 40%; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.45); transition: border-color .15s; }
+.reticle.hit { border-color: var(--ok); } .reticle.dup { border-color: var(--warn); }
+.camMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; color: var(--muted); font-size: 13px; }
+.cam.on .camMsg { display: none; }
+
+.live { display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--line); border-radius: 10px; padding: 6px 10px; min-height: 58px; justify-content: center; }
+.live.ok { border-left-color: var(--ok); background: var(--ok-bg); } .live.dup { border-left-color: var(--warn); background: var(--warn-bg); } .live.bad { border-left-color: var(--bad); }
+.live .num { font: 700 22px var(--font-mono); letter-spacing: -.02em; overflow-wrap: anywhere; }
+.live .tag { font-size: 12.5px; font-weight: 700; } .live.ok .tag { color: var(--ok); } .live.dup .tag { color: var(--warn); } .live.bad .tag { color: var(--bad); }
+.live .mv { align-self: flex-start; min-height: 30px; font-size: 12px; margin-top: 2px; }
+
+.cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.cat { flex-direction: column; min-height: 52px; gap: 0; border-width: 2px; border-color: var(--line); line-height: 1.15; }
+.cat b { font: 700 20px var(--font-mono); color: var(--cc); }
+.cat span { font-size: 12.5px; }
+.cat[aria-pressed="true"] { border-color: var(--cc); background: var(--surface); box-shadow: inset 0 0 0 1px var(--cc); font-weight: 700; }
+.total { border: 1px dashed var(--line); border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 52px; line-height: 1.15; }
+.total b { font: 700 20px var(--font-mono); } .total span { font-size: 12.5px; color: var(--muted); }
+
+.ctrls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.manual { display: flex; gap: 6px; }
+.manual input { flex: 1; min-width: 0; min-height: 36px; font: 400 14px var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; }
+.listhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.listhead b { font-size: 13px; }
+.pane { max-height: 26vh; min-height: 90px; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 4px; }
+.h { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--cc, var(--line)); border-radius: 8px; padding: 3px 4px 3px 8px; }
+.h .n { flex: none; min-width: 30px; text-align: right; font: 700 14px var(--font-mono); color: var(--muted); }
+.h .t { flex: 1; min-width: 0; font: 600 15px var(--font-mono); overflow-wrap: anywhere; }
+.h .t small { display: block; font: 400 11px var(--font-body); color: var(--muted); }
+.h button { flex: none; min-height: 30px; width: 30px; padding: 0; font-size: 15px; }
+.h.new { animation: pop .5s ease-out; } @keyframes pop { from { background: var(--ok-bg); } }
+.status { font-size: 12px; color: var(--muted); min-height: 0; } .status:empty { display: none; } .status.err { color: var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>등기 스캐너</h1><span class="chip busy" id="engine">엔진 준비 중</span></header>
+
+  <div class="cam" id="cam">
+    <video id="v" playsinline muted></video>
+    <div class="reticle" id="ret"></div>
+    <div class="camMsg" id="camMsg">"스캔 시작"을 누르면 카메라가 켜집니다.<br>구분을 고른 뒤 등기 바코드를 비추세요.</div>
+  </div>
+
+  <div class="live" id="live" aria-live="polite"><div class="tag">구분을 고르고 바코드를 비춰 주세요</div></div>
+
+  <div class="cats" id="cats"></div>
+
+  <div class="ctrls">
+    <button class="primary" id="toggle">스캔 시작</button>
+    <button id="vol">소리: 보통</button>
+    <button id="shape">화면: 원본</button>
+  </div>
+  <div class="status" id="status" role="status"></div>
+
+  <div class="manual">
+    <input id="manual" inputmode="numeric" autocomplete="off" placeholder="등기번호 직접 입력 (바코드가 안 읽힐 때)">
+    <button class="primary" id="manualGo">추가</button>
+  </div>
+  <div class="listhead"><b id="listTitle"></b><button id="viewAll" style="min-height:28px;font-size:12px">전체 보기</button></div>
+  <div class="pane" id="pane"></div>
+  <div class="ctrls">
+    <button id="copy">결과 복사</button>
+    <button id="save">엑셀로 저장</button>
+    <button id="reset">전체 지우기</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var CATS = [
+    { k: '재배달', c: 'var(--c0)' }, { k: '보관', c: 'var(--c1)' }, { k: '이사간곳발송', c: 'var(--c2)' },
+    { k: '반송', c: 'var(--c3)' }, { k: '반송불능', c: 'var(--c4)' }
+  ];
+  var data = {}; CATS.forEach(function (c) { data[c.k] = []; });      // k -> [{n, t}]
+  var cur = CATS[0].k, showAll = false, last = null;
+  function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  try { var sv = JSON.parse(load('mail-data', 'null')); if (sv) CATS.forEach(function (c) { if (Array.isArray(sv[c.k])) data[c.k] = sv[c.k].map(function (r) { return { n: String(r.n), t: r.t }; }); }); } catch (e) {}
+  if (data[load('mail-cat', '')]) cur = load('mail-cat', '');
+  function persist() { save('mail-data', JSON.stringify(data)); save('mail-cat', cur); }
+  function say(msg, kind) { var s = $('status'); s.textContent = msg || ''; s.className = 'status' + (kind ? ' ' + kind : ''); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function hhmm(t) { var d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+  function total() { return CATS.reduce(function (s, c) { return s + data[c.k].length; }, 0); }
+  function where(n) { for (var i = 0; i < CATS.length; i++) if (data[CATS[i].k].some(function (r) { return r.n === n; })) return CATS[i].k; return null; }
+  function cc(k) { for (var i = 0; i < CATS.length; i++) if (CATS[i].k === k) return CATS[i].c; return 'var(--line)'; }
+
+  /* ---------- sound ---------- */
+  var audio = null;
+  var VOLS = [{ n: '끔', g: 0 }, { n: '작게', g: 0.03 }, { n: '보통', g: 0.12 }, { n: '크게', g: 0.4 }], volIdx = 2;
+  var vv = parseInt(load('mail-vol', '2'), 10); if (vv >= 0 && vv < VOLS.length) volIdx = vv;
+  function beep(kind) {
+    try {
+      if (!audio || !VOLS[volIdx].g) return;
+      var tones = kind === 'dup' ? [0, 0.2] : [0];
+      tones.forEach(function (dt) {
+        var o = audio.createOscillator(), g = audio.createGain();
+        o.frequency.value = kind === 'dup' ? 520 : 880; g.gain.value = VOLS[volIdx].g; o.connect(g); g.connect(audio.destination);
+        o.start(audio.currentTime + dt); o.stop(audio.currentTime + dt + 0.14);
+      });
+    } catch (e) {}
+  }
+  $('vol').addEventListener('click', function () {
+    volIdx = (volIdx + 1) % VOLS.length; save('mail-vol', String(volIdx)); $('vol').textContent = '소리: ' + VOLS[volIdx].n;
+    try { if (!audio) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) audio = new AC(); } if (audio && audio.state === 'suspended') audio.resume(); } catch (e) {}
+    beep('ok');
+  });
+  $('vol').textContent = '소리: ' + VOLS[volIdx].n;
+
+  /* ---------- rendering ---------- */
+  function renderCats() {
+    var box = $('cats'); box.textContent = '';
+    CATS.forEach(function (c) {
+      var b = document.createElement('button'); b.className = 'cat'; b.style.setProperty('--cc', c.c); b.setAttribute('aria-pressed', c.k === cur ? 'true' : 'false');
+      var n = document.createElement('b'); n.textContent = String(data[c.k].length); var s = document.createElement('span'); s.textContent = c.k;
+      b.append(n, s); b.onclick = function () { cur = c.k; showAll = false; persist(); renderCats(); renderList(); }; box.append(b);
+    });
+    var t = document.createElement('div'); t.className = 'total'; var n2 = document.createElement('b'); n2.textContent = String(total()); var s2 = document.createElement('span'); s2.textContent = '합계'; t.append(n2, s2); box.append(t);
+  }
+  function renderList(newN) {
+    var pane = $('pane'); pane.textContent = '';
+    $('viewAll').textContent = showAll ? '구분별 보기' : '전체 보기';
+    var rows = [];
+    if (showAll) { CATS.forEach(function (c) { data[c.k].forEach(function (r, i) { rows.push({ k: c.k, r: r, i: i }); }); }); $('listTitle').textContent = '전체 · ' + total() + '개'; }
+    else { data[cur].forEach(function (r, i) { rows.push({ k: cur, r: r, i: i }); }); $('listTitle').textContent = cur + ' · ' + data[cur].length + '개'; }
+    rows.sort(function (a, b) { return b.r.t - a.r.t; });
+    if (!rows.length) { var p = document.createElement('p'); p.className = 'muted'; p.textContent = '아직 없어요. 스캔하면 여기에 쌓입니다.'; pane.append(p); }
+    rows.forEach(function (e) {
+      var d = document.createElement('div'); d.className = 'h' + (e.r.n === newN ? ' new' : ''); d.style.setProperty('--cc', cc(e.k));
+      var n = document.createElement('div'); n.className = 'n'; n.textContent = String(e.i + 1);
+      var t = document.createElement('div'); t.className = 't'; t.textContent = e.r.n;
+      var s = document.createElement('small'); s.textContent = (showAll ? e.k + ' · ' : '') + hhmm(e.r.t); t.append(s);
+      var x = document.createElement('button'); x.textContent = '×'; x.setAttribute('aria-label', e.r.n + ' 지우기');
+      x.onclick = function () { data[e.k] = data[e.k].filter(function (r) { return r !== e.r; }); persist(); renderCats(); renderList(); };
+      d.append(n, t, x); pane.append(d);
+    });
+  }
+  function setLive(cls, tag, num, moveTo) {
+    var l = $('live'); l.className = 'live ' + cls; l.textContent = '';
+    if (num) { var nn = document.createElement('div'); nn.className = 'num'; nn.textContent = num; l.append(nn); }
+    var t = document.createElement('div'); t.className = 'tag'; t.textContent = tag; l.append(t);
+    if (moveTo) { var b = document.createElement('button'); b.className = 'mv'; b.textContent = moveTo.label; b.onclick = moveTo.fn; l.append(b); }
+    var r = $('ret'); r.className = 'reticle' + (cls === 'ok' ? ' hit' : cls === 'dup' ? ' dup' : '');
+    clearTimeout(setLive.t); setLive.t = setTimeout(function () { r.className = 'reticle'; }, 900);
+  }
+
+  /* ---------- registering ---------- */
+  var NUM = /^\d{10,15}$/, INTL = /^[A-Z]{2}\d{9}[A-Z]{2}$/;
+  function clean(raw) { var s = String(raw || '').replace(/[\s-]/g, '').toUpperCase(); return (NUM.test(s) || INTL.test(s)) ? s : null; }
+  function moveNum(n, to) {
+    var from = where(n); if (!from || from === to) return;
+    data[from] = data[from].filter(function (r) { return r.n !== n; }); data[to].push({ n: n, t: Date.now() });
+    persist(); renderCats(); renderList(n); setLive('ok', n === '' ? '' : to + '(으)로 옮겼어요 (' + data[to].length + '번째)', n);
+  }
+  function register(raw, manual) {
+    var n = clean(raw);
+    if (!n) { if (manual) { setLive('bad', '등기번호 형식이 아니에요 (숫자 13자리)', String(raw)); } return false; }
+    var w = where(n);
+    if (w === cur) { setLive('dup', cur + '에 이미 있어요', n); beep('dup'); return false; }
+    if (w) { setLive('dup', '이미 ' + w + '에 있어요', n, { label: cur + '(으)로 옮기기', fn: function () { moveNum(n, cur); } }); beep('dup'); return false; }
+    data[cur].push({ n: n, t: Date.now() }); persist(); renderCats(); renderList(n);
+    setLive('ok', cur + ' · ' + data[cur].length + '번째 · 합계 ' + total(), n); beep('ok'); return true;
+  }
+  $('manualGo').addEventListener('click', function () { var v = $('manual').value; if (!v.trim()) return; if (register(v, true)) $('manual').value = ''; });
+  $('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('manualGo').click(); });
+  $('viewAll').addEventListener('click', function () { showAll = !showAll; renderList(); });
+
+  /* ---------- results ---------- */
+  $('copy').addEventListener('click', function () {
+    var t = CATS.map(function (c) { return c.k + ' ' + data[c.k].length + '개' + (data[c.k].length ? '\n' + data[c.k].map(function (r) { return r.n; }).join('\n') : ''); }).join('\n\n') + '\n\n합계 ' + total() + '개';
+    (navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { say('복사했어요.'); }, function () { say('복사가 막혀 있어요. 엑셀로 저장을 이용해 주세요.', 'err'); });
+  });
+  $('save').addEventListener('click', function () {
+    if (!total()) { say('저장할 기록이 없어요.', 'err'); return; }
+    var day = new Date(), stamp = day.getFullYear() + pad(day.getMonth() + 1) + pad(day.getDate());
+    var all = [['구분', '등기번호', '시간']]; CATS.forEach(function (c) { data[c.k].forEach(function (r) { all.push([c.k, r.n, hhmm(r.t)]); }); });
+    var sum = [['구분', '개수']]; CATS.forEach(function (c) { sum.push([c.k, data[c.k].length]); }); sum.push(['합계', total()]);
+    try {
+      var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), '요약'); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(all), '전체');
+      XLSX.writeFile(wb, '등기_' + stamp + '.xlsx'); say('엑셀로 저장했어요.');
+    } catch (e) { say('엑셀 저장에 실패했어요. "결과 복사"를 이용해 주세요.', 'err'); }
+  });
+  $('reset').addEventListener('click', function () {
+    if (!total()) return;
+    if (!confirm('등기번호 ' + total() + '개를 모두 지울까요? (엑셀로 저장해 두셨나요?)')) return;
+    CATS.forEach(function (c) { data[c.k] = []; }); persist(); renderCats(); renderList(); setLive('', '지웠어요');
+  });
+
+  /* ---------- barcode engine ---------- */
+  var native = null, zx = null, engineReady = false;
+  function initEngine() {
+    try {
+      if ('BarcodeDetector' in window) { native = new BarcodeDetector({ formats: ['code_128', 'code_39', 'itf', 'ean_13', 'codabar'] }); }
+    } catch (e) { native = null; }
+    if (!native) {
+      if (!window.ZXing) { $('engine').className = 'chip err'; $('engine').textContent = '엔진 불러오기 실패'; say('바코드 읽는 엔진을 못 불러왔어요. 인터넷을 확인하고 새로고침해 주세요.', 'err'); return; }
+      var Z = window.ZXing, hints = new Map();
+      hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.ITF, Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.CODABAR]);
+      hints.set(Z.DecodeHintType.TRY_HARDER, true);
+      zx = new Z.MultiFormatReader(); zx.setHints(hints);
+    }
+    engineReady = true; $('engine').className = 'chip ready'; $('engine').textContent = '스캔 준비 완료';
+  }
+  var cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+  async function readFrame(video) {
+    if (native) { var r = await native.detect(video); return r && r.length ? r[0].rawValue : null; }
+    var w = video.videoWidth, h = video.videoHeight; if (!w || !h) return null;
+    var sc = Math.min(1, 1280 / Math.max(w, h)); cv.width = Math.round(w * sc); cv.height = Math.round(h * sc);
+    cx.drawImage(video, 0, 0, cv.width, cv.height);
+    var px = cx.getImageData(0, 0, cv.width, cv.height).data, lum = new Uint8ClampedArray(cv.width * cv.height);
+    for (var i = 0, j = 0; i < px.length; i += 4, j++) lum[j] = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 8;
+    try {
+      var Z = window.ZXing, bmp = new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.RGBLuminanceSource(lum, cv.width, cv.height)));
+      return zx.decode(bmp).getText();
+    } catch (e) { return null; }     // NotFoundException = no barcode in this frame
+  }
+
+  /* ---------- camera ---------- */
+  var stream = null, scanning = false, busy = false, wake = null, lastSeen = '', lastSeenAt = 0, wide = load('mail-wide', '0') === '1';
+  function setAR() {
+    var v = $('v'), ar = wide ? 16 / 9 : ((v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : 16 / 9);
+    $('cam').style.setProperty('--ar', String(ar)); v.style.objectFit = wide ? 'cover' : 'contain'; $('shape').textContent = wide ? '화면: 가로로 보기' : '화면: 원본';
+  }
+  $('shape').addEventListener('click', function () { wide = !wide; save('mail-wide', wide ? '1' : '0'); setAR(); });
+  async function tick() {
+    if (!scanning) return;
+    var v = $('v'), delay = 140;
+    if (!busy && v.readyState >= 2) {
+      busy = true;
+      try {
+        var raw = await readFrame(v);
+        if (raw) {
+          var now = Date.now();
+          if (raw !== lastSeen || now - lastSeenAt > 2500) { register(raw, false); }   // the same code held in view is not re-announced every frame
+          lastSeen = raw; lastSeenAt = now;
+        }
+      } catch (e) {} finally { busy = false; }
+    }
+    setTimeout(tick, delay);
+  }
+  async function startScan() {
+    if (!engineReady) { say('엔진이 아직 준비 중이에요. 잠시 후 다시 눌러 주세요.', 'err'); return; }
+    try {
+      if (!audio) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) audio = new AC(); }
+      if (audio && audio.state === 'suspended') audio.resume();
+    } catch (e) {}
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    } catch (e) { say('카메라를 켤 수 없어요. 설정에서 카메라 권한을 허용해 주세요. (https 주소로 열어야 해요)', 'err'); return; }
+    var v = $('v'); v.srcObject = stream; v.setAttribute('playsinline', ''); try { await v.play(); } catch (e) {}
+    v.onloadedmetadata = setAR; setAR();
+    $('cam').classList.add('on'); scanning = true; $('toggle').textContent = '스캔 멈춤'; $('toggle').className = 'stop'; say('');
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    setLive('', '바코드를 네모 안에 맞춰 주세요'); tick();
+  }
+  function stopScan() {
+    scanning = false; if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; $('v').srcObject = null;
+    $('cam').classList.remove('on'); $('toggle').textContent = '스캔 시작'; $('toggle').className = 'primary';
+    try { if (wake) wake.release(); } catch (e) {} wake = null;
+  }
+  $('toggle').addEventListener('click', function () { scanning ? stopScan() : startScan(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden && scanning) stopScan(); });
+
+  $('toggle').className = 'primary';
+  renderCats(); renderList(); initEngine();
+  window.__mail = { register: register, data: data };   // for testing
+})();
+</script>
+</body>
+</html>
