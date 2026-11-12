@@ -19,7 +19,7 @@
 :root {
   color-scheme: dark;
   --bg: #0B1211; --surface: #141E1D; --surface2: #1B2827; --ink: #E6EEED; --muted: #8FA3A0; --line: #263634;
-  --accent: #F2A33A; --accent-ink: #231500; --ok: #5BD08A; --ok-bg: #12301F; --warn: #F0B44C; --warn-bg: #33270F; --bad: #FF8A80;
+  --accent: #F2A33A; --accent-ink: #231500; --ok: #5BD08A; --ok-bg: #12301F; --warn: #F0B44C; --warn-bg: #33270F; --bad: #FF8A80; --red: #FF4D4D; --red-bg: #3A1416;
   --c0: #5CCFCB; --c1: #7FB2FF; --c2: #C79BFF; --c3: #FF8A80; --c4: #F0B44C;
   --font-body: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -46,12 +46,14 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
 .cam { position: relative; width: min(100%, calc(32vh * var(--ar, 1.7778))); aspect-ratio: var(--ar, 1.7778); margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); max-width: 100%; }
 .cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .reticle { position: absolute; left: 6%; width: 88%; top: 30%; height: 40%; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.45); transition: border-color .15s; }
+.reticle.redhit { border-color: var(--red); }
 .reticle.hit { border-color: var(--ok); } .reticle.dup { border-color: var(--warn); }
 .camMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; color: var(--muted); font-size: 13px; }
 .cam.on .camMsg { display: none; }
 
 .live { display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--line); border-radius: 10px; padding: 6px 10px; min-height: 58px; justify-content: center; }
-.live.ok { border-left-color: var(--ok); background: var(--ok-bg); } .live.dup { border-left-color: var(--warn); background: var(--warn-bg); } .live.bad { border-left-color: var(--bad); }
+.live.ok { border-left-color: var(--ok); background: var(--ok-bg); } .live.dup { border-left-color: var(--warn); background: var(--warn-bg); } .live.red { border-left-color: var(--red); background: var(--red-bg); } .live.red .tag, .live.red .num { color: var(--red); }
+.live.bad { border-left-color: var(--bad); }
 .live .num { font: 700 22px var(--font-mono); letter-spacing: -.02em; overflow-wrap: anywhere; }
 .live .tag { font-size: 12.5px; font-weight: 700; } .live.ok .tag { color: var(--ok); } .live.dup .tag { color: var(--warn); } .live.bad .tag { color: var(--bad); }
 .live .mv { align-self: flex-start; min-height: 30px; font-size: 12px; margin-top: 2px; }
@@ -75,6 +77,8 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
 .h .t { flex: 1; min-width: 0; font: 600 15px var(--font-mono); overflow-wrap: anywhere; }
 .h .t small { display: block; font: 400 11px var(--font-body); color: var(--muted); }
 .h button { flex: none; min-height: 30px; width: 30px; padding: 0; font-size: 15px; }
+.h.red { background: var(--red-bg); border-color: var(--red); }
+.h.red .t { color: #FF8A8A; }
 .h.new { animation: pop .5s ease-out; } @keyframes pop { from { background: var(--ok-bg); } }
 .status { font-size: 12px; color: var(--muted); min-height: 0; } .status:empty { display: none; } .status.err { color: var(--bad); }
 </style>
@@ -137,6 +141,7 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
   function hhmm(t) { var d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
   function total() { return CATS.reduce(function (s, c) { return s + data[c.k].length; }, 0); }
   function where(n) { for (var i = 0; i < CATS.length; i++) if (data[CATS[i].k].some(function (r) { return r.n === n; })) return CATS[i].k; return null; }
+  function isRedNum(n) { return /^[23]/.test(String(n)); }   // 등기번호가 2 또는 3으로 시작하면 빨강
   function cc(k) { for (var i = 0; i < CATS.length; i++) if (CATS[i].k === k) return CATS[i].c; return 'var(--line)'; }
 
   /* ---------- sound ---------- */
@@ -180,7 +185,7 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     rows.sort(function (a, b) { return b.r.t - a.r.t; });
     if (!rows.length) { var p = document.createElement('p'); p.className = 'muted'; p.textContent = '아직 없어요. 스캔하면 여기에 쌓입니다.'; pane.append(p); }
     rows.forEach(function (e) {
-      var d = document.createElement('div'); d.className = 'h' + (e.r.n === newN ? ' new' : ''); d.style.setProperty('--cc', cc(e.k));
+      var d = document.createElement('div'); d.className = 'h' + (e.r.n === newN ? ' new' : '') + (isRedNum(e.r.n) ? ' red' : ''); d.style.setProperty('--cc', cc(e.k));
       var n = document.createElement('div'); n.className = 'n'; n.textContent = String(e.i + 1);
       var t = document.createElement('div'); t.className = 't'; t.textContent = e.r.n;
       var s = document.createElement('small'); s.textContent = (showAll ? e.k + ' · ' : '') + hhmm(e.r.t); t.append(s);
@@ -194,7 +199,7 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     if (num) { var nn = document.createElement('div'); nn.className = 'num'; nn.textContent = num; l.append(nn); }
     var t = document.createElement('div'); t.className = 'tag'; t.textContent = tag; l.append(t);
     if (moveTo) { var b = document.createElement('button'); b.className = 'mv'; b.textContent = moveTo.label; b.onclick = moveTo.fn; l.append(b); }
-    var r = $('ret'); r.className = 'reticle' + (cls === 'ok' ? ' hit' : cls === 'dup' ? ' dup' : '');
+    var r = $('ret'); r.className = 'reticle' + (cls === 'ok' ? ' hit' : cls === 'red' ? ' redhit' : cls === 'dup' ? ' dup' : '');
     clearTimeout(setLive.t); setLive.t = setTimeout(function () { r.className = 'reticle'; }, 900);
   }
 
@@ -204,7 +209,7 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
   function moveNum(n, to) {
     var from = where(n); if (!from || from === to) return;
     data[from] = data[from].filter(function (r) { return r.n !== n; }); data[to].push({ n: n, t: Date.now() });
-    persist(); renderCats(); renderList(n); setLive('ok', n === '' ? '' : to + '(으)로 옮겼어요 (' + data[to].length + '번째)', n);
+    persist(); renderCats(); renderList(n); setLive(isRedNum(n) ? 'red' : 'ok', to + '(으)로 옮겼어요 (' + data[to].length + '번째)', n);
   }
   function register(raw, manual) {
     var n = clean(raw);
@@ -213,7 +218,7 @@ button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-w
     if (w === cur) { setLive('dup', cur + '에 이미 있어요', n); beep('dup'); return false; }
     if (w) { setLive('dup', '이미 ' + w + '에 있어요', n, { label: cur + '(으)로 옮기기', fn: function () { moveNum(n, cur); } }); beep('dup'); return false; }
     data[cur].push({ n: n, t: Date.now() }); persist(); renderCats(); renderList(n);
-    setLive('ok', cur + ' · ' + data[cur].length + '번째 · 합계 ' + total(), n); beep('ok'); return true;
+    setLive(isRedNum(n) ? 'red' : 'ok', cur + ' · ' + data[cur].length + '번째 · 합계 ' + total(), n); beep('ok'); return true;
   }
   $('manualGo').addEventListener('click', function () { var v = $('manual').value; if (!v.trim()) return; if (register(v, true)) $('manual').value = ''; });
   $('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('manualGo').click(); });
