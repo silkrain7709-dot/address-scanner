@@ -42,6 +42,7 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
 .cam { position: relative; width: min(100%, calc(42vh * var(--ar, 1.7778))); aspect-ratio: var(--ar, 1.7778); margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); touch-action: manipulation; }
 .cam video, .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .cam video { object-fit: contain; }
+.cam video.rotated { inset: auto; left: 50%; top: 50%; }
 .camMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; color: var(--muted); font-size: 13px; pointer-events: none; }
 .cam.on .camMsg { display: none; }
 .hint { position: absolute; left: 6px; right: 6px; bottom: 6px; background: rgba(0,0,0,.7); border: 1px solid var(--ball); color: var(--ball); border-radius: 8px; padding: 4px 8px; font-size: 12.5px; text-align: center; pointer-events: none; }
@@ -61,7 +62,8 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
 .distbox { display: flex; gap: 6px; align-items: center; background: var(--surface); border: 1px solid var(--ball); border-radius: 8px; padding: 6px; }
 .distbox input { width: 80px; min-height: 36px; font: 600 16px var(--font-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; text-align: right; }
 .distbox span { font-size: 13px; } .distbox .sp { flex: 1; }
-.ctrls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ctrls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.ctrls button { padding: 0 2px; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; text-align: center; line-height: 1.2; }
 .stat b { display: block; font: 700 18px var(--font-mono); } .stat span { font-size: 11.5px; color: var(--muted); }
@@ -98,6 +100,7 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
   <div class="ctrls">
     <button class="primary" id="toggle">카메라 켜기</button>
     <button id="vol">소리: 보통</button>
+    <button id="rotBtn">회전: 0°</button>
     <button id="reset">기록 지우기</button>
   </div>
   <div class="status" id="status" role="status"></div>
@@ -235,7 +238,7 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
     hist.push(rec); save('tn-hist', JSON.stringify(hist)); lastResult = { pts: tk.pts, until: Date.now() + 4000 };
     showResult(rec); renderHist(); beep();
   }
-  window.__tennis = { find: findBlobs, step: function (blobs, t) { frameT = t; trackStep(blobs); }, flush: function () { var d = track; track = null; finish(d); }, setScale: function (s) { scale = s; }, setDt: function (d) { medDt = d; }, hist: hist, color: color };
+  window.__tennis = { find: findBlobs, step: function (blobs, t) { frameT = t; trackStep(blobs); }, flush: function () { var d = track; track = null; finish(d); }, setScale: function (s) { scale = s; }, setDt: function (d) { medDt = d; }, hist: hist, color: color, snap: function () { return [pc.width, pc.height, pc.toDataURL()]; }, rot: function () { return rot; } };
 
   /* ---------- results ---------- */
   function showResult(rec) {
@@ -258,6 +261,36 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
   }
   $('reset').addEventListener('click', function () { if (!hist.length) return; if (!confirm('서브 기록 ' + hist.length + '개를 모두 지울까요?')) return; hist.length = 0; save('tn-hist', '[]'); renderHist(); $('live').className = 'live idle'; $('bigNum').textContent = '--'; $('liveTag').textContent = '기록을 지웠어요'; $('liveSub').textContent = ''; });
 
+  /* ---------- picture rotation (0/90/180/270, clockwise): what you see and what is measured are rotated the same way ---------- */
+  var rot = parseInt(load('tn-rot', '0'), 10) || 0; if ([0, 90, 180, 270].indexOf(rot) < 0) rot = 0;
+  function procSize(w) { var v = $('v'); if (!v.videoWidth) return [w, Math.round(w * 9 / 16)]; return rot % 180 ? [w, Math.round(w * v.videoWidth / v.videoHeight)] : [w, Math.round(w * v.videoHeight / v.videoWidth)]; }
+  function procW() { var v = $('v'); if (!v.videoWidth) return 640; var ar = rot % 180 ? v.videoHeight / v.videoWidth : v.videoWidth / v.videoHeight; return Math.max(240, Math.min(640, Math.floor(Math.sqrt(345600 * ar)))); }   // keeps the work per frame about the same for tall and wide pictures
+  function drawRot(w) {              // draws the current video frame, rotated, into the working canvas; returns [w, h]
+    var v = $('v'), sz = procSize(w), h = sz[1];
+    if (pc.width !== w || pc.height !== h) { pc.width = w; pc.height = h; }
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (rot === 0) pctx.drawImage(v, 0, 0, w, h);
+    else if (rot === 90) { pctx.translate(w, 0); pctx.rotate(Math.PI / 2); pctx.drawImage(v, 0, 0, h, w); }
+    else if (rot === 180) { pctx.translate(w, h); pctx.rotate(Math.PI); pctx.drawImage(v, 0, 0, w, h); }
+    else { pctx.translate(0, h); pctx.rotate(-Math.PI / 2); pctx.drawImage(v, 0, 0, h, w); }
+    pctx.setTransform(1, 0, 0, 1, 0, 0);
+    return sz;
+  }
+  function fitVideo() {
+    var v = $('v'), c = $('cam'), bw = c.clientWidth, bh = c.clientHeight;
+    if (rot === 0) { v.classList.remove('rotated'); v.style.width = v.style.height = v.style.transform = ''; return; }
+    v.classList.add('rotated');
+    v.style.width = (rot % 180 ? bh : bw) + 'px'; v.style.height = (rot % 180 ? bw : bh) + 'px'; v.style.transform = 'translate(-50%,-50%) rotate(' + rot + 'deg)';
+  }
+  window.addEventListener('resize', function () { setTimeout(fitVideo, 50); });
+  $('rotBtn').textContent = '회전: ' + rot + '°';
+  $('rotBtn').addEventListener('click', function () {
+    rot = (rot + 90) % 360; save('tn-rot', String(rot)); $('rotBtn').textContent = '회전: ' + rot + '°';
+    prevY = null; track = null; lastResult = null;
+    if (scale || calPts.length) { scale = null; calPts = []; mode = null; $('distBox').hidden = true; setHint(''); updSteps(); say('화면을 돌렸어요. 거리를 다시 맞춰 주세요. (② 거리 맞추기)'); }
+    setAR(); drawOverlay();
+  });
+
   /* ---------- camera, frame loop ---------- */
   var stream = null, running = false, pc = document.createElement('canvas'), pctx = pc.getContext('2d', { willReadFrequently: true });
   var dts = [], medDt = 1 / 30, lastTs = null, warm = 0, procMs = 0, frames = 0, fpsT = 0, wake = null;
@@ -272,9 +305,7 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
     }
     lastTs = ts;
     if (warm < 8 || !v.videoWidth) return;
-    var t0 = performance.now(), w = 640, h = Math.round(640 * v.videoHeight / v.videoWidth);
-    if (pc.width !== w || pc.height !== h) { pc.width = w; pc.height = h; }
-    pctx.drawImage(v, 0, 0, w, h);
+    var t0 = performance.now(), sz = drawRot(procW()), w = sz[0], h = sz[1];
     var blobs = findBlobs(pctx.getImageData(0, 0, w, h).data, w, h);
     if (scale || true) trackStep(blobs);
     procMs = procMs * 0.9 + (performance.now() - t0) * 0.1;
@@ -282,7 +313,7 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
     drawOverlay();
   }
   function schedule() { var v = $('v'); if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(onFrame); else requestAnimationFrame(function (n) { onFrame(n, null); }); }
-  function setAR() { var v = $('v'); if (v.videoWidth) $('cam').style.setProperty('--ar', String(v.videoWidth / v.videoHeight)); sizeOverlay(); }
+  function setAR() { var v = $('v'); if (v.videoWidth) $('cam').style.setProperty('--ar', String(rot % 180 ? v.videoHeight / v.videoWidth : v.videoWidth / v.videoHeight)); fitVideo(); sizeOverlay(); }
   async function startCam() {
     ensureAudio();
     try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }, audio: false }); }
@@ -319,10 +350,9 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
     if (!mode || !running) return;
     var r = $('cam').getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
     if (mode === 'color') {
-      var v = $('v'), w = 160, h = Math.round(160 * v.videoHeight / v.videoWidth); pc.width = w; pc.height = h; pctx.drawImage(v, 0, 0, w, h);
+      var sz = drawRot(160), w = sz[0], h = sz[1];
       var cx0 = Math.round(fx * w), cy0 = Math.round(fy * h), best = null, bs = -1;
       for (var yy = -4; yy <= 4; yy++) for (var xx = -4; xx <= 4; xx++) { var x = cx0 + xx, y = cy0 + yy; if (x < 0 || y < 0 || x >= w || y >= h) continue; var p = pctx.getImageData(x, y, 1, 1).data, hv = rgb2hsv(p[0], p[1], p[2]), sc = hv.s * hv.v; if (sc > bs) { bs = sc; best = hv; } }
-      pc.width = 640; pc.height = Math.round(640 * v.videoHeight / v.videoWidth);
       if (!best || best.s < 0.2) { say('공이 아닌 곳을 누른 것 같아요. 공의 가장 선명한 부분을 눌러 주세요.', 'err'); return; }
       color = { h: best.h, tol: 22, s: Math.max(0.22, best.s - 0.3), v: Math.max(0.25, best.v - 0.35), learned: true }; save('tn-color', JSON.stringify(color)); window.__tennis.color = color;
       mode = null; setHint(''); say('공 색을 기억했어요. (색상 ' + Math.round(best.h) + '°)'); updSteps();
@@ -337,7 +367,7 @@ button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0
   $('distBtn').addEventListener('click', function () { if (!running) { say('먼저 카메라를 켜 주세요.', 'err'); return; } mode = 'dist'; calPts = []; $('distBox').hidden = true; drawOverlay(); setHint('거리를 아는 두 점을 차례로 탭하세요 (공이 지나갈 선 위)'); say(''); });
   $('distOk').addEventListener('click', function () {
     var m = parseFloat($('distIn').value); if (!(m >= 0.1)) { say('거리를 숫자로 입력해 주세요. (예: 3)', 'err'); return; }
-    var v = $('v'), W = 640, H = Math.round(640 * v.videoHeight / v.videoWidth), dpx = Math.hypot((calPts[1].x - calPts[0].x) * W, (calPts[1].y - calPts[0].y) * H);
+    var W = procW(), H = procSize(W)[1], dpx = Math.hypot((calPts[1].x - calPts[0].x) * W, (calPts[1].y - calPts[0].y) * H);
     if (dpx < 40) { say('두 점이 너무 가까워요. 더 멀리 떨어진 두 점을 찍어 주세요.', 'err'); return; }
     distM = m; save('tn-dist', String(m)); scale = m / dpx; mode = null; $('distBox').hidden = true; setHint(''); say('거리를 맞췄어요. 이제 서브를 쳐 보세요.'); updSteps();
     $('liveTag').textContent = '서브를 쳐 보세요'; $('liveSub').textContent = '공이 화면을 가로로 지나가면 속도가 나와요'; setTimeout(function () { calPts = []; drawOverlay(); }, 1500);
