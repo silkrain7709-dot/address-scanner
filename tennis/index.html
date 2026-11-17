@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>서브 스피드</title>
+<meta name="theme-color" content="#0E1A12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="서브속도">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0E1A12; --surface: #16251B; --surface2: #1E3024; --ink: #EAF2EC; --muted: #93A89A; --line: #2A4332;
+  --ball: #D4F13A; --ball-ink: #1A2200; --ok: #5BD08A; --warn: #F0B44C; --bad: #FF8A80;
+  --font-body: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 14px/1.4 var(--font-body);
+  padding-block: max(8px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(10px, env(safe-area-inset-left, 0px)); padding-right: max(10px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+h1 { font-size: 17px; margin: 0; }
+.chip { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; background: var(--surface2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.chip.ready { color: var(--ok); border-color: var(--ok); } .chip.warn { color: var(--warn); border-color: var(--warn); }
+.muted { color: var(--muted); font-size: 12px; margin: 0; }
+button { font: 500 13px var(--font-body); min-height: 36px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+button.primary { background: var(--ball); border-color: var(--ball); color: var(--ball-ink); font-weight: 700; }
+button.stop { background: #5A2320; border-color: #8A3731; color: #FFD9D5; font-weight: 700; }
+button.ok { border-color: var(--ok); color: var(--ok); }
+button.on { border-color: var(--ball); color: var(--ball); box-shadow: inset 0 0 0 1px var(--ball); }
+:focus-visible { outline: 3px solid var(--ball); outline-offset: 2px; }
+
+.cam { position: relative; width: min(100%, calc(42vh * var(--ar, 1.7778))); aspect-ratio: var(--ar, 1.7778); margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); touch-action: manipulation; }
+.cam video, .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cam video { object-fit: contain; }
+.camMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; color: var(--muted); font-size: 13px; pointer-events: none; }
+.cam.on .camMsg { display: none; }
+.hint { position: absolute; left: 6px; right: 6px; bottom: 6px; background: rgba(0,0,0,.7); border: 1px solid var(--ball); color: var(--ball); border-radius: 8px; padding: 4px 8px; font-size: 12.5px; text-align: center; pointer-events: none; }
+
+.live { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--line); border-radius: 10px; padding: 6px 12px; min-height: 76px; }
+.live.hit { border-left-color: var(--ball); background: #222E0A; }
+.live .big { font: 800 44px/1 var(--font-mono); letter-spacing: -.03em; color: var(--ball); min-width: 4ch; text-align: right; }
+.live .unit { font: 700 14px var(--font-body); color: var(--muted); margin-left: 3px; }
+.live .side { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.live .tag { font-size: 13px; font-weight: 700; } .live .sub { font-size: 12px; color: var(--muted); }
+.live.idle .big { color: var(--muted); font-size: 26px; }
+
+.steps { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.steps button { flex-direction: column; min-height: 46px; line-height: 1.2; }
+.steps small { font-size: 11px; color: var(--muted); font-weight: 400; }
+.steps button.ok small { color: var(--ok); }
+.distbox { display: flex; gap: 6px; align-items: center; background: var(--surface); border: 1px solid var(--ball); border-radius: 8px; padding: 6px; }
+.distbox input { width: 80px; min-height: 36px; font: 600 16px var(--font-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; text-align: right; }
+.distbox span { font-size: 13px; } .distbox .sp { flex: 1; }
+.ctrls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; text-align: center; line-height: 1.2; }
+.stat b { display: block; font: 700 18px var(--font-mono); } .stat span { font-size: 11.5px; color: var(--muted); }
+.pane { max-height: 22vh; min-height: 60px; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 4px; }
+.h { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--ball); border-radius: 8px; padding: 3px 4px 3px 8px; }
+.h .n { flex: none; min-width: 28px; text-align: right; font: 700 13px var(--font-mono); color: var(--muted); }
+.h .t { flex: 1; font: 700 18px var(--font-mono); } .h .t small { font: 400 11.5px var(--font-body); color: var(--muted); margin-left: 6px; }
+.h button { flex: none; min-height: 30px; width: 30px; padding: 0; font-size: 15px; }
+.h.best { border-left-color: var(--ok); } .h.best .t { color: var(--ok); }
+.status { font-size: 12px; color: var(--muted); } .status:empty { display: none; } .status.err { color: var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>서브 스피드</h1><span class="chip" id="fpsChip">카메라 꺼짐</span></header>
+
+  <div class="cam" id="cam">
+    <video id="v" playsinline muted></video>
+    <canvas id="ov"></canvas>
+    <div class="camMsg" id="camMsg">폰을 코트 옆에 세워 두고 "카메라 켜기"를 누르세요.<br>서브 방향과 직각으로, 공이 가로로 지나가게 놓아 주세요.</div>
+    <div class="hint" id="hint" hidden></div>
+  </div>
+
+  <div class="live idle" id="live" aria-live="polite"><div class="big" id="bigNum">--</div><div class="side"><div class="tag" id="liveTag">준비 중</div><div class="sub" id="liveSub">카메라를 켜고 두 가지를 맞춰 주세요</div></div></div>
+
+  <div class="steps">
+    <button id="colorBtn">① 공 색 맞추기<small id="colorSm">처음 한 번 필요</small></button>
+    <button id="distBtn">② 거리 맞추기<small id="distSm">매번 필요</small></button>
+  </div>
+  <div class="distbox" id="distBox" hidden>
+    <span>두 점 사이 실제 거리</span><input id="distIn" type="number" inputmode="decimal" step="0.01" min="0.1"><span>m</span><span class="sp"></span><button class="primary" id="distOk">확인</button>
+  </div>
+
+  <div class="ctrls">
+    <button class="primary" id="toggle">카메라 켜기</button>
+    <button id="vol">소리: 보통</button>
+    <button id="reset">기록 지우기</button>
+  </div>
+  <div class="status" id="status" role="status"></div>
+
+  <div class="stats">
+    <div class="stat"><b id="sN">0</b><span>횟수</span></div>
+    <div class="stat"><b id="sAvg">--</b><span>평균 km/h</span></div>
+    <div class="stat"><b id="sMax">--</b><span>최고 km/h</span></div>
+  </div>
+  <div class="pane" id="pane"></div>
+  <p class="muted">대략적인 속도예요. 폰을 고정하고, 거리를 정확히 맞출수록 정확해요. 공이 카메라 쪽으로 오거나 멀어지는 방향은 못 재요.</p>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function say(m, kind) { var s = $('status'); s.textContent = m || ''; s.className = 'status' + (kind ? ' ' + kind : ''); }
+
+  /* ---------- settings ---------- */
+  var MIN_KMH = 50, MAX_KMH = 280;
+  var color = { h: 68, tol: 24, s: 0.40, v: 0.45, learned: false };
+  try { var c0 = JSON.parse(load('tn-color', 'null')); if (c0 && isFinite(c0.h)) color = c0; } catch (e) {}
+  var distM = parseFloat(load('tn-dist', '3')) || 3;
+  var scale = null;                        // meters per processed pixel (set by 거리 맞추기, per session)
+  var calPts = [];                         // two taps, as fractions of the frame
+  var mode = null;                         // 'color' | 'dist' | null
+  var hist = []; try { hist = JSON.parse(load('tn-hist', '[]')) || []; } catch (e) {}
+
+  /* ---------- sound ---------- */
+  var audio = null, VOLS = [{ n: '끔', g: 0 }, { n: '작게', g: 0.03 }, { n: '보통', g: 0.12 }, { n: '크게', g: 0.4 }], volIdx = 2;
+  var vv = parseInt(load('tn-vol', '2'), 10); if (vv >= 0 && vv < VOLS.length) volIdx = vv;
+  function beep() { try { if (!audio || !VOLS[volIdx].g) return; var o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = 880; g.gain.value = VOLS[volIdx].g; o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.16); } catch (e) {} }
+  function ensureAudio() { try { if (!audio) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) audio = new AC(); } if (audio && audio.state === 'suspended') audio.resume(); } catch (e) {} }
+  $('vol').textContent = '소리: ' + VOLS[volIdx].n;
+  $('vol').addEventListener('click', function () { volIdx = (volIdx + 1) % VOLS.length; save('tn-vol', String(volIdx)); $('vol').textContent = '소리: ' + VOLS[volIdx].n; ensureAudio(); beep(); });
+
+  /* ---------- ball finding (works on plain RGBA pixels, so it can be tested without a camera) ---------- */
+  var PW = 640, PH = 360, curY = null, prevY = null, mask = null;
+  function resize(w, h) { PW = w; PH = h; curY = new Uint8Array(w * h); prevY = null; mask = new Uint8Array(w * h); }
+  function isBall(r, g, b) {
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx === 0) return false;
+    var s = (mx - mn) / mx, v = mx / 255; if (s < color.s || v < color.v) return false;
+    var d = mx - mn, h;
+    if (mx === r) h = 60 * (((g - b) / d) % 6); else if (mx === g) h = 60 * ((b - r) / d + 2); else h = 60 * ((r - g) / d + 4);
+    if (h < 0) h += 360;
+    return Math.abs(h - color.h) <= color.tol;
+  }
+  var MOTION = 20;
+  function findBlobs(rgba, w, h) {
+    if (!curY || w !== PW || h !== PH) resize(w, h);
+    var n = w * h, i, p, cand = 0;
+    for (i = 0, p = 0; i < n; i++, p += 4) curY[i] = (rgba[p] * 77 + rgba[p + 1] * 150 + rgba[p + 2] * 29) >> 8;
+    var blobs = [];
+    if (prevY) {
+      mask.fill(0);
+      for (i = 0, p = 0; i < n; i++, p += 4) {
+        var d = curY[i] - prevY[i]; if (d < 0) d = -d;
+        if (d > MOTION && isBall(rgba[p], rgba[p + 1], rgba[p + 2])) { mask[i] = 1; cand++; }
+      }
+      if (cand > 0 && cand < 7000) {
+        var stack = [];
+        for (i = 0; i < n; i++) {
+          if (mask[i] !== 1) continue;
+          var minx = w, maxx = 0, miny = h, maxy = 0, cnt = 0; stack.length = 0; stack.push(i); mask[i] = 2;
+          while (stack.length) {
+            var q = stack.pop(), qx = q % w, qy = (q / w) | 0; cnt++;
+            if (qx < minx) minx = qx; if (qx > maxx) maxx = qx; if (qy < miny) miny = qy; if (qy > maxy) maxy = qy;
+            for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) {
+              var nx = qx + dx, ny = qy + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+              var ni = ny * w + nx; if (mask[ni] === 1) { mask[ni] = 2; stack.push(ni); }
+            }
+          }
+          if (cnt < 3) continue;
+          // the true ball centre: every ball-coloured pixel in the (slightly grown) box, moving or not
+          var x0 = Math.max(0, minx - 3), x1 = Math.min(w - 1, maxx + 3), y0 = Math.max(0, miny - 3), y1 = Math.min(h - 1, maxy + 3), sx = 0, sy = 0, a = 0;
+          for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) { var pi = (yy * w + xx) * 4; if (isBall(rgba[pi], rgba[pi + 1], rgba[pi + 2])) { sx += xx; sy += yy; a++; } }
+          if (a < 4 || a > 900) continue;
+          var bw = maxx - minx + 1, bh = maxy - miny + 1; if (Math.max(bw, bh) / Math.min(bw, bh) > 6) continue;
+          blobs.push({ x: sx / a, y: sy / a, a: a });
+        }
+      }
+    }
+    var tmp = prevY; prevY = curY; curY = tmp || new Uint8Array(n);
+    return blobs;
+  }
+
+  /* ---------- tracking one serve ---------- */
+  var track = null, frameT = 0, lastResult = null;
+  function maxJumpPx() { return scale ? (MAX_KMH / 3.6) * medDt / scale * 1.15 : PW * 0.25; }
+  function trackStep(blobs) {
+    var dt = medDt, pick = null, i;
+    if (track) {
+      var L = track.pts[track.pts.length - 1], px, py, gate;
+      if (track.pts.length >= 2) { var P = track.pts[track.pts.length - 2], k = (L.t - P.t); var vx = (L.x - P.x) / k, vy = (L.y - P.y) / k, gap = frameT - L.t; px = L.x + vx * gap; py = L.y + vy * gap; gate = 0.5 * Math.hypot(vx, vy) * gap + 25; }
+      else { px = L.x; py = L.y; gate = maxJumpPx(); }
+      var bd = 1e9;
+      for (i = 0; i < blobs.length; i++) { var dd = Math.hypot(blobs[i].x - px, blobs[i].y - py); if (dd < gate && dd < bd) { bd = dd; pick = blobs[i]; } }
+      if (pick && (pick.a > track.a0 * 3 || pick.a < track.a0 / 3.5)) pick = null;    // not the same size: not the same object
+      if (pick) { pick.t = frameT; track.pts.push(pick); track.miss = 0; if (!validTrack(track)) { track = null; } }
+      else if (++track.miss > 3) { var done = track; track = null; finish(done); }
+    }
+    if (!track && blobs.length) {
+      var b = blobs[0]; for (i = 1; i < blobs.length; i++) if (blobs[i].a > b.a) b = blobs[i];
+      b.t = frameT; track = { pts: [b], miss: 0, a0: b.a };
+    }
+  }
+  function validTrack(tk) {           // after 3 points: must move in a steady direction at a serve-like speed
+    var p = tk.pts, n = p.length; if (n < 3) return true;
+    var a = p[n - 3], b = p[n - 2], c = p[n - 1], v1x = (b.x - a.x) / (b.t - a.t), v1y = (b.y - a.y) / (b.t - a.t), v2x = (c.x - b.x) / (c.t - b.t), v2y = (c.y - b.y) / (c.t - b.t);
+    var s1 = Math.hypot(v1x, v1y), s2 = Math.hypot(v2x, v2y); if (s1 < 1 || s2 < 1) return false;
+    var cos = (v1x * v2x + v1y * v2y) / (s1 * s2); if (cos < 0.8) return false;           // direction changes by more than ~37°
+    if (s2 / s1 > 1.6 || s1 / s2 > 1.6) return false;                                        // speed jumps around
+    if (scale) { var kmh = Math.max(s1, s2) * scale * 3.6; if (kmh < MIN_KMH * 0.8 || kmh > MAX_KMH * 1.1) return false; }
+    return true;
+  }
+  function regSpeed(w) {              // least-squares velocity over a window of points (px / s)
+    var n = w.length, st = 0, sx = 0, sy = 0, stt = 0, stx = 0, sty = 0, i;
+    for (i = 0; i < n; i++) { st += w[i].t; sx += w[i].x; sy += w[i].y; }
+    var mt = st / n, mx = sx / n, my = sy / n;
+    for (i = 0; i < n; i++) { var dt = w[i].t - mt; stt += dt * dt; stx += dt * (w[i].x - mx); sty += dt * (w[i].y - my); }
+    return stt ? Math.hypot(stx / stt, sty / stt) : 0;
+  }
+  function measure(pts) {             // fastest 3-point stretch, in km/h
+    var best = 0; for (var i = 0; i + 3 <= pts.length; i++) best = Math.max(best, regSpeed(pts.slice(i, i + 3)));
+    return best * scale * 3.6;
+  }
+  function finish(tk) {
+    if (!tk || tk.pts.length < 3) return;
+    if (!scale) { say('거리를 먼저 맞춰 주세요. (② 거리 맞추기)', 'err'); return; }
+    var kmh = measure(tk.pts), span = Math.hypot(tk.pts[tk.pts.length - 1].x - tk.pts[0].x, tk.pts[tk.pts.length - 1].y - tk.pts[0].y) * scale;
+    if (kmh < MIN_KMH || kmh > MAX_KMH || span < 0.5) return;
+    var rec = { kmh: Math.round(kmh), t: Date.now(), n: tk.pts.length };
+    hist.push(rec); save('tn-hist', JSON.stringify(hist)); lastResult = { pts: tk.pts, until: Date.now() + 4000 };
+    showResult(rec); renderHist(); beep();
+  }
+  window.__tennis = { find: findBlobs, step: function (blobs, t) { frameT = t; trackStep(blobs); }, flush: function () { var d = track; track = null; finish(d); }, setScale: function (s) { scale = s; }, setDt: function (d) { medDt = d; }, hist: hist, color: color };
+
+  /* ---------- results ---------- */
+  function showResult(rec) {
+    var l = $('live'); l.className = 'live hit'; $('bigNum').innerHTML = ''; $('bigNum').textContent = String(rec.kmh);
+    var u = document.createElement('span'); u.className = 'unit'; u.textContent = 'km/h'; $('bigNum').append(u);
+    $('liveTag').textContent = hist.length + '번째 서브'; $('liveSub').textContent = '공을 ' + rec.n + '프레임 따라갔어요 · 위 점들이 공 위치예요';
+  }
+  function renderHist() {
+    var pane = $('pane'); pane.textContent = '';
+    var mx = 0, sum = 0; hist.forEach(function (r) { sum += r.kmh; if (r.kmh > mx) mx = r.kmh; });
+    $('sN').textContent = String(hist.length); $('sAvg').textContent = hist.length ? String(Math.round(sum / hist.length)) : '--'; $('sMax').textContent = hist.length ? String(mx) : '--';
+    for (var i = hist.length - 1; i >= 0; i--) (function (i) {
+      var r = hist[i], d = document.createElement('div'); d.className = 'h' + (r.kmh === mx ? ' best' : '');
+      var n = document.createElement('div'); n.className = 'n'; n.textContent = String(i + 1);
+      var t = document.createElement('div'); t.className = 't'; t.textContent = r.kmh + ' km/h'; var sm = document.createElement('small'); var dt = new Date(r.t); sm.textContent = ('0' + dt.getHours()).slice(-2) + ':' + ('0' + dt.getMinutes()).slice(-2) + ':' + ('0' + dt.getSeconds()).slice(-2); t.append(sm);
+      var x = document.createElement('button'); x.textContent = '×'; x.setAttribute('aria-label', '이 기록 지우기'); x.onclick = function () { hist.splice(i, 1); save('tn-hist', JSON.stringify(hist)); renderHist(); };
+      d.append(n, t, x); pane.append(d);
+    })(i);
+    if (!hist.length) { var p = document.createElement('p'); p.className = 'muted'; p.textContent = '아직 기록이 없어요. 서브를 치면 여기에 쌓여요.'; pane.append(p); }
+  }
+  $('reset').addEventListener('click', function () { if (!hist.length) return; if (!confirm('서브 기록 ' + hist.length + '개를 모두 지울까요?')) return; hist.length = 0; save('tn-hist', '[]'); renderHist(); $('live').className = 'live idle'; $('bigNum').textContent = '--'; $('liveTag').textContent = '기록을 지웠어요'; $('liveSub').textContent = ''; });
+
+  /* ---------- camera, frame loop ---------- */
+  var stream = null, running = false, pc = document.createElement('canvas'), pctx = pc.getContext('2d', { willReadFrequently: true });
+  var dts = [], medDt = 1 / 30, lastTs = null, warm = 0, procMs = 0, frames = 0, fpsT = 0, wake = null;
+  function median(a) { var s = a.slice().sort(function (x, y) { return x - y; }); return s[(s.length / 2) | 0]; }
+  function onFrame(now, meta) {
+    if (!running) return;
+    var v = $('v'); schedule();
+    var ts = (meta && (meta.captureTime || meta.presentationTime)) || now;
+    if (lastTs !== null) {
+      var dt = (ts - lastTs) / 1000;
+      if (dt > 0.002 && dt < 0.25) { dts.push(dt); if (dts.length > 60) dts.shift(); medDt = median(dts); var k = Math.max(1, Math.round(dt / medDt)); frameT += k * medDt; warm++; } else if (dt >= 0.25) { frameT += dt; }
+    }
+    lastTs = ts;
+    if (warm < 8 || !v.videoWidth) return;
+    var t0 = performance.now(), w = 640, h = Math.round(640 * v.videoHeight / v.videoWidth);
+    if (pc.width !== w || pc.height !== h) { pc.width = w; pc.height = h; }
+    pctx.drawImage(v, 0, 0, w, h);
+    var blobs = findBlobs(pctx.getImageData(0, 0, w, h).data, w, h);
+    if (scale || true) trackStep(blobs);
+    procMs = procMs * 0.9 + (performance.now() - t0) * 0.1;
+    frames++; if (now - fpsT > 1000) { var fps = Math.round(1 / medDt); var ch = $('fpsChip'); ch.textContent = fps + 'fps · ' + Math.round(procMs) + 'ms'; ch.className = 'chip ' + (fps >= 50 ? 'ready' : 'warn'); fpsT = now; frames = 0; }
+    drawOverlay();
+  }
+  function schedule() { var v = $('v'); if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(onFrame); else requestAnimationFrame(function (n) { onFrame(n, null); }); }
+  function setAR() { var v = $('v'); if (v.videoWidth) $('cam').style.setProperty('--ar', String(v.videoWidth / v.videoHeight)); sizeOverlay(); }
+  async function startCam() {
+    ensureAudio();
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }, audio: false }); }
+    catch (e) { say('카메라를 켤 수 없어요. 설정에서 카메라 권한을 허용해 주세요. (https 주소로 열어야 해요)', 'err'); return; }
+    var v = $('v'); v.srcObject = stream; v.onloadedmetadata = setAR; try { await v.play(); } catch (e) {} setAR();
+    try { var tr = stream.getVideoTracks()[0], caps = tr.getCapabilities ? tr.getCapabilities() : {}, adv = {}; if (caps.focusMode && caps.focusMode.indexOf('continuous') >= 0) adv.focusMode = 'continuous'; if (caps.exposureMode && caps.exposureMode.indexOf('continuous') >= 0) adv.exposureMode = 'continuous'; if (Object.keys(adv).length) await tr.applyConstraints({ advanced: [adv] }); } catch (e) {}
+    running = true; dts = []; lastTs = null; warm = 0; prevY = null; track = null; $('cam').classList.add('on'); $('toggle').textContent = '카메라 끄기'; $('toggle').className = 'stop'; say('');
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    $('liveTag').textContent = checkReady() || '서브를 쳐 보세요'; $('liveSub').textContent = checkReady() ? '' : '공이 화면을 가로로 지나가면 속도가 나와요'; schedule();
+  }
+  function stopCam() { running = false; if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; $('v').srcObject = null; $('cam').classList.remove('on'); $('toggle').textContent = '카메라 켜기'; $('toggle').className = 'primary'; $('fpsChip').textContent = '카메라 꺼짐'; $('fpsChip').className = 'chip'; try { if (wake) wake.release(); } catch (e) {} wake = null; }
+  $('toggle').className = 'primary';
+  $('toggle').addEventListener('click', function () { running ? stopCam() : startCam(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden && running) stopCam(); });
+  function checkReady() { if (!color.learned) return '① 공 색을 먼저 맞춰 주세요 (기본 색으로도 시도는 해요)'; if (!scale) return '② 거리를 맞춰 주세요'; return ''; }
+
+  /* ---------- tapping on the picture: ball colour and distance ---------- */
+  var ov = $('ov'), octx = ov.getContext('2d');
+  function sizeOverlay() { var r = $('cam').getBoundingClientRect(), d = window.devicePixelRatio || 1; ov.width = Math.round(r.width * d); ov.height = Math.round(r.height * d); }
+  window.addEventListener('resize', sizeOverlay);
+  function setHint(t) { var h = $('hint'); h.hidden = !t; h.textContent = t || ''; }
+  function drawOverlay() {
+    octx.clearRect(0, 0, ov.width, ov.height); var W = ov.width, H = ov.height;
+    calPts.forEach(function (p, i) { octx.fillStyle = '#D4F13A'; octx.beginPath(); octx.arc(p.x * W, p.y * H, 7, 0, 7); octx.fill(); });
+    if (calPts.length === 2) { octx.strokeStyle = '#D4F13A'; octx.lineWidth = 3; octx.setLineDash([8, 6]); octx.beginPath(); octx.moveTo(calPts[0].x * W, calPts[0].y * H); octx.lineTo(calPts[1].x * W, calPts[1].y * H); octx.stroke(); octx.setLineDash([]); }
+    if (lastResult && Date.now() < lastResult.until) {
+      var sx = W / PW, sy = H / PH; octx.strokeStyle = '#5BD08A'; octx.fillStyle = '#5BD08A'; octx.lineWidth = 2; octx.beginPath();
+      lastResult.pts.forEach(function (p, i) { octx[i ? 'lineTo' : 'moveTo'](p.x * sx, p.y * sy); }); octx.stroke();
+      lastResult.pts.forEach(function (p) { octx.beginPath(); octx.arc(p.x * sx, p.y * sy, 5, 0, 7); octx.fill(); });
+    }
+  }
+  function rgb2hsv(r, g, b) { var mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, h = 0; if (d) { if (mx === r) h = 60 * (((g - b) / d) % 6); else if (mx === g) h = 60 * ((b - r) / d + 2); else h = 60 * ((r - g) / d + 4); if (h < 0) h += 360; } return { h: h, s: mx ? d / mx : 0, v: mx / 255 }; }
+  $('cam').addEventListener('click', function (e) {
+    if (!mode || !running) return;
+    var r = $('cam').getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+    if (mode === 'color') {
+      var v = $('v'), w = 160, h = Math.round(160 * v.videoHeight / v.videoWidth); pc.width = w; pc.height = h; pctx.drawImage(v, 0, 0, w, h);
+      var cx0 = Math.round(fx * w), cy0 = Math.round(fy * h), best = null, bs = -1;
+      for (var yy = -4; yy <= 4; yy++) for (var xx = -4; xx <= 4; xx++) { var x = cx0 + xx, y = cy0 + yy; if (x < 0 || y < 0 || x >= w || y >= h) continue; var p = pctx.getImageData(x, y, 1, 1).data, hv = rgb2hsv(p[0], p[1], p[2]), sc = hv.s * hv.v; if (sc > bs) { bs = sc; best = hv; } }
+      pc.width = 640; pc.height = Math.round(640 * v.videoHeight / v.videoWidth);
+      if (!best || best.s < 0.2) { say('공이 아닌 곳을 누른 것 같아요. 공의 가장 선명한 부분을 눌러 주세요.', 'err'); return; }
+      color = { h: best.h, tol: 22, s: Math.max(0.22, best.s - 0.3), v: Math.max(0.25, best.v - 0.35), learned: true }; save('tn-color', JSON.stringify(color)); window.__tennis.color = color;
+      mode = null; setHint(''); say('공 색을 기억했어요. (색상 ' + Math.round(best.h) + '°)'); updSteps();
+    } else if (mode === 'dist') {
+      if (calPts.length >= 2) calPts = [];
+      calPts.push({ x: fx, y: fy }); drawOverlayNow();
+      if (calPts.length === 2) { $('distBox').hidden = false; $('distIn').value = String(distM); setHint('아래에 두 점 사이 실제 거리를 입력하세요'); } else setHint('두 번째 점을 탭하세요');
+    }
+  });
+  function drawOverlayNow() { drawOverlay(); }
+  $('colorBtn').addEventListener('click', function () { if (!running) { say('먼저 카메라를 켜 주세요.', 'err'); return; } mode = 'color'; calPts = []; $('distBox').hidden = true; drawOverlay(); setHint('공을 화면에 보이게 들고, 화면의 공을 탭하세요'); say(''); });
+  $('distBtn').addEventListener('click', function () { if (!running) { say('먼저 카메라를 켜 주세요.', 'err'); return; } mode = 'dist'; calPts = []; $('distBox').hidden = true; drawOverlay(); setHint('거리를 아는 두 점을 차례로 탭하세요 (공이 지나갈 선 위)'); say(''); });
+  $('distOk').addEventListener('click', function () {
+    var m = parseFloat($('distIn').value); if (!(m >= 0.1)) { say('거리를 숫자로 입력해 주세요. (예: 3)', 'err'); return; }
+    var v = $('v'), W = 640, H = Math.round(640 * v.videoHeight / v.videoWidth), dpx = Math.hypot((calPts[1].x - calPts[0].x) * W, (calPts[1].y - calPts[0].y) * H);
+    if (dpx < 40) { say('두 점이 너무 가까워요. 더 멀리 떨어진 두 점을 찍어 주세요.', 'err'); return; }
+    distM = m; save('tn-dist', String(m)); scale = m / dpx; mode = null; $('distBox').hidden = true; setHint(''); say('거리를 맞췄어요. 이제 서브를 쳐 보세요.'); updSteps();
+    $('liveTag').textContent = '서브를 쳐 보세요'; $('liveSub').textContent = '공이 화면을 가로로 지나가면 속도가 나와요'; setTimeout(function () { calPts = []; drawOverlay(); }, 1500);
+  });
+  function updSteps() {
+    $('colorBtn').className = color.learned ? 'ok' : ''; $('colorSm').textContent = color.learned ? '맞춤 완료 (다시 누르면 변경)' : '처음 한 번 필요';
+    $('distBtn').className = scale ? 'ok' : ''; $('distSm').textContent = scale ? '맞춤 완료 · 폰을 움직이면 다시' : '매번 필요';
+  }
+  updSteps(); renderHist();
+  setInterval(function () { if (!running) return; if (lastResult && Date.now() > lastResult.until) { lastResult = null; drawOverlay(); } }, 500);
+})();
+</script>
+</body>
+</html>
