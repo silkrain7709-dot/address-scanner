@@ -281,7 +281,7 @@ details.listbox > .panel { margin-top: 6px; }
   <section aria-labelledby="h-man" class="tabpane" data-pane="man">
     <h2 id="h-man" hidden>주소 직접 입력</h2>
     <div class="manual">
-      <input id="manual" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="예: 발안로 123">
+      <input id="manual" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="예: 발안로 123 또는 발안리 123-4">
       <button class="primary" id="manualGo">찾기</button>
       <button id="manualClr">삭제</button>
     </div>
@@ -932,6 +932,16 @@ details.listbox > .panel { margin-top: 6px; }
 
 
   /* ---------- manual typing ---------- */
+  // 지번 검색용: 주소 괄호 안 글자 + 엑셀의 다른 열 값(지번 열 등)을 합쳐 둔다
+  function jibunText(it) {
+    if (it.jn === undefined) {
+      var parts = [];
+      (String(it.a).match(/\([^)]*\)|\[[^\]]*\]/g) || []).forEach(function (p) { parts.push(p.slice(1, -1)); });
+      (it.x || []).forEach(function (p) { if (p[1]) parts.push(p[1]); });
+      it.jn = core(parts.join(' ')).replace(/ /g, '');
+    }
+    return it.jn;
+  }
   function searchManual(q) {
     var cs = core(q), n = cs.replace(/ /g, '');
     if (n.length < 2) return [];
@@ -943,6 +953,7 @@ details.listbox > .panel { margin-top: 6px; }
       else if (it.n.indexOf(n) !== -1) sc = 3;
       else if (n.length >= 6 && bounded(n, it.n)) sc = 4;
       else { var d = dice(g, it.g); if (d >= 0.5) sc = d; }
+      if (!sc) { var jn = jibunText(it); if (jn && bounded(jn, n, 2)) sc = 2.5; }
       if (sc) out.push({ it: it, idx: idx, sc: sc });
     });
     out.sort(function (a, b) { return b.sc - a.sc || a.idx - b.idx; });
