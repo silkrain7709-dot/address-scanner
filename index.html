@@ -938,14 +938,15 @@ details.listbox > .panel { margin-top: 6px; }
       var parts = [];
       (String(it.a).match(/\([^)]*\)|\[[^\]]*\]/g) || []).forEach(function (p) { parts.push(p.slice(1, -1)); });
       (it.x || []).forEach(function (p) { if (p[1]) parts.push(p[1]); });
-      it.jn = core(parts.join(' ')).replace(/ /g, '');
+      // 항목 사이에 '/'를 넣어 두어야 앞뒤 숫자(전화번호 등)와 붙어 번지로 잘못 읽히지 않는다
+      it.jn = parts.map(function (p) { return core(p).replace(/ /g, ''); }).filter(function (p) { return p; }).join('/');
     }
     return it.jn;
   }
   function searchManual(q) {
     var cs = core(q), n = cs.replace(/ /g, '');
     if (n.length < 2) return [];
-    var g = grams(n), out = [];
+    var g = grams(n), out = [], toks = cs.split(' ').filter(function (t) { return t; });
     list.forEach(function (it, idx) {
       var sc = 0;
       if (it.n === n) sc = 5;
@@ -953,7 +954,10 @@ details.listbox > .panel { margin-top: 6px; }
       else if (it.n.indexOf(n) !== -1) sc = 3;
       else if (n.length >= 6 && bounded(n, it.n)) sc = 4;
       else { var d = dice(g, it.g); if (d >= 0.5) sc = d; }
-      if (!sc) { var jn = jibunText(it); if (jn && bounded(jn, n, 2)) sc = 2.5; }
+      var jn = jibunText(it);
+      if (!sc && jn && bounded(jn, n, 2)) sc = 2.5;
+      // 행정구역 + 지번처럼 띄어쓴 여러 단어: 각 단어가 주소나 지번 중 어디에 있어도 찾는다
+      if (sc < 2.5 && toks.length >= 2 && toks.every(function (t) { return bounded(it.n, t, 1) || (jn && bounded(jn, t, 1)); })) sc = 3.2;
       if (sc) out.push({ it: it, idx: idx, sc: sc });
     });
     out.sort(function (a, b) { return b.sc - a.sc || a.idx - b.idx; });
