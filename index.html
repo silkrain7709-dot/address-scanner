@@ -946,7 +946,7 @@ details.listbox > .panel { margin-top: 6px; }
       if (sc) out.push({ it: it, idx: idx, sc: sc });
     });
     out.sort(function (a, b) { return b.sc - a.sc || a.idx - b.idx; });
-    return out.slice(0, 8);
+    return out;
   }
   function renderCands() {
     var box = $('cands'), q = $('manual').value.trim(); box.textContent = '';
@@ -955,6 +955,7 @@ details.listbox > .panel { margin-top: 6px; }
     if (!q) { msg('주소 일부만 입력해도 목록에서 몇 번째인지 찾아 줍니다.'); return; }
     var rs = searchManual(q);
     if (!rs.length) { msg('목록에서 찾지 못했어요. 글자를 줄이거나 번지만 입력해 보세요.'); return; }
+    if (rs.length > 8) msg('총 ' + rs.length + '개 — 아래로 스크롤해서 모두 볼 수 있어요.');
     rs.forEach(function (r) {
       var done = found.has(r.idx);
       var d = document.createElement('div'); d.className = 'cand' + (done ? ' done' : '') + (r.it.col ? ' col' : '') + (moved.has(r.it.a) ? ' moved' : '');
