@@ -813,7 +813,8 @@ details.listbox > .panel { margin-top: 6px; }
   function listItem(e) { for (var i = 0; i < list.length; i++) if (list[i].o === e.o && list[i].a === e.a) return list[i]; return { x: [], col: '' }; }
   function sortedFound() { return Array.from(found.values()).sort(function (a, b) { var x = parseFloat(a.o), y = parseFloat(b.o); return (isNaN(x) ? 1e9 : x) - (isNaN(y) ? 1e9 : y); }); }
   $('copy').addEventListener('click', async function () {
-    var txt = sortedFound().map(function (e) { var it = listItem(e); return [e.o, e.a].concat((it.x || []).map(function (p) { return p[1]; })).concat(it.col ? [colorName(it.col)] : []).concat(isMoved(it) ? ['주소이전'] : []).join('\t'); }).join('\n'); if (!txt) return;
+    // 형식: "순번 : 271 / 도로명 : … / 지번 : … / 코스 : … / 순로 : …" 한 줄씩, 기록 사이 빈 줄, 시간 없음
+    var txt = sortedFound().map(function (e) { var it = listItem(e); return ['순번 : ' + e.o, '도로명 : ' + e.a].concat((it.x || []).map(function (p) { return p[0] + ' : ' + p[1]; })).join('\n'); }).join('\n\n'); if (!txt) return;
     var b = this, old = b.textContent;
     try { await navigator.clipboard.writeText(txt); b.textContent = '복사했어요'; } catch (e) { b.textContent = '복사하지 못했어요'; }
     setTimeout(function () { b.textContent = old; }, 1600);
